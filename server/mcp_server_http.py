@@ -3,6 +3,7 @@ HTTP-based MCP server for production deployment to GCP
 Integrates with Open WebUI using FastAPI and bearer token authentication
 """
 import asyncio
+import json
 import logging
 import os
 from contextlib import asynccontextmanager

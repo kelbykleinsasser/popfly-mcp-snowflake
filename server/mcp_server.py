@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from typing import Any, Dict, List
 from mcp.server import Server
@@ -61,7 +62,6 @@ class SnowflakeMCP:
         @self.server.call_tool()
         async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             """Handle tool calls with raw request logging"""
-            import json
             from tools.snowflake_tools import handle_snowflake_tool
             from tools.cortex_tools import handle_cortex_tool
             
