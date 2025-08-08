@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - ENVIRONMENT=local
+      - PYTHONPATH=/app
+    env_file:
+      - .env
+    volumes:
+      - ./auth:/app/auth:ro
+      - ./logs:/app/logs
+    ports:
+      - "8000:8000"
+    command: ["python", "server/mcp_server_http.py"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped

@@ -1,0 +1,19 @@
+{
+  "name": "snowflake-mcp-server",
+  "version": "1.0.0",
+  "description": "Python-based MCP server for Snowflake integration with Open WebUI",
+  "private": true,
+  "scripts": {
+    "dev": "python -m server.mcp_server",
+    "test": "pytest tests/",
+    "lint": "ruff check .",
+    "format": "black ."
+  },
+  "repository": {
+    "type": "git",
+    "url": "local"
+  },
+  "keywords": ["mcp", "snowflake", "python", "openwebui"],
+  "author": "Popfly",
+  "license": "MIT"
+}
