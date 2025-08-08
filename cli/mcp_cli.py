@@ -39,10 +39,14 @@ class MCPServerCLI:
         # Get tools from the tool modules directly
         from tools.snowflake_tools import get_snowflake_tools
         from tools.cortex_tools import get_cortex_tools
+        from utils.logging import log_activity
         
         tools = []
         tools.extend(get_snowflake_tools())
         tools.extend(get_cortex_tools())
+        
+        # Log the list_tools operation
+        await log_activity("list_tools", {}, len(tools))
         
         for tool in tools:
             print(f"🔧 {tool.name}")
@@ -83,14 +87,21 @@ class MCPServerCLI:
             print(f"📝 Arguments: {json.dumps(arguments, indent=2)}")
             print("-" * 50)
             
-            # Call the tool handlers directly
+            # Call the tool handlers directly with raw request
             from tools.snowflake_tools import handle_snowflake_tool
             from tools.cortex_tools import handle_cortex_tool
             
+            # Capture raw request for logging
+            raw_request = json.dumps({
+                "method": "cli_call",
+                "tool_name": tool_name,
+                "arguments": arguments
+            })
+            
             if tool_name in ['list_databases', 'list_schemas', 'list_tables', 'describe_table', 'read_query', 'append_insight']:
-                result = await handle_snowflake_tool(tool_name, arguments)
+                result = await handle_snowflake_tool(tool_name, arguments, raw_request=raw_request)
             elif tool_name in ['query_payments']:
-                result = await handle_cortex_tool(tool_name, arguments)
+                result = await handle_cortex_tool(tool_name, arguments, raw_request=raw_request)
             else:
                 print(f"❌ Unknown tool: {tool_name}")
                 return

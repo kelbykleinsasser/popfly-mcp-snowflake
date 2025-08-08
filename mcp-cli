@@ -1,0 +1,23 @@
+#!/bin/bash
+
+# MCP CLI Wrapper Script
+# This script sets up the environment and runs the MCP CLI tool
+
+# Get the directory where this script is located
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+# Activate virtual environment
+source "$SCRIPT_DIR/venv/bin/activate"
+
+# Set PYTHONPATH to include the project directory
+export PYTHONPATH="$SCRIPT_DIR:$PYTHONPATH"
+
+# Run the MCP CLI with all arguments passed to this script
+# Suppress debug output by default unless --debug flag is used
+if [[ "$*" == *"--debug"* ]]; then
+    # Remove --debug from arguments and run with debug output
+    python -m cli.mcp_cli "${@//--debug/}"
+else
+    # Run with debug output suppressed
+    python -m cli.mcp_cli "$@" 2>/dev/null
+fi

@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from typing import Dict, Any, List
 from mcp.types import Tool, TextContent
 from pydantic import BaseModel, validator
@@ -142,30 +143,68 @@ def get_snowflake_tools() -> List[Tool]:
         )
     ]
 
-async def handle_snowflake_tool(tool_name: str, arguments: Dict[str, Any]) -> List[TextContent]:
-    """Handle Snowflake tool calls"""
+async def handle_snowflake_tool(tool_name: str, arguments: Dict[str, Any], bearer_token: str = None, raw_request: str = None) -> List[TextContent]:
+    """Handle Snowflake tool calls with timing and pre/post logging"""
+    import uuid
+    
+    # Generate unique request ID to link pre and post entries
+    request_id = str(uuid.uuid4())
+    
+    # Log pre-processing stage with raw request
+    start_time = time.time()
+    await log_activity(
+        tool_name=tool_name,
+        arguments=arguments,
+        processing_stage="pre",
+        raw_request=raw_request,
+        bearer_token=bearer_token,
+        request_id=request_id
+    )
+    
     try:
         if tool_name == "list_databases":
-            return await list_databases_handler(arguments)
+            result = await list_databases_handler(arguments, bearer_token, request_id)
         elif tool_name == "list_schemas":
-            return await list_schemas_handler(arguments)
+            result = await list_schemas_handler(arguments, bearer_token, request_id)
         elif tool_name == "list_tables":
-            return await list_tables_handler(arguments)
+            result = await list_tables_handler(arguments, bearer_token, request_id)
         elif tool_name == "describe_table":
-            return await describe_table_handler(arguments)
+            result = await describe_table_handler(arguments, bearer_token, request_id)
         elif tool_name == "read_query":
-            return await read_query_handler(arguments)
+            result = await read_query_handler(arguments, bearer_token, request_id)
         elif tool_name == "append_insight":
-            return await append_insight_handler(arguments)
+            result = await append_insight_handler(arguments, bearer_token, request_id)
         else:
-            return [TextContent(type="text", text=f"Unknown Snowflake tool: {tool_name}")]
+            result = [TextContent(type="text", text=f"Unknown Snowflake tool: {tool_name}")]
+        
+        # Calculate execution time
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        
+        # Post-processing logging is done in individual handlers with row counts
+        # but we'll pass the execution time through
+        return result
+        
     except Exception as error:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        
+        # Log post-processing stage with error
+        await log_activity(
+            tool_name=tool_name,
+            arguments=arguments,
+            processing_stage="post",
+            execution_success=False,
+            execution_time_ms=execution_time_ms,
+            bearer_token=bearer_token,
+            request_id=request_id
+        )
+        
         logging.error(f"Error in {tool_name}: {error}")
         return [TextContent(type="text", text=f"Error: {str(error)}")]
 
 # Tool handler functions
-async def list_databases_handler(arguments: Dict[str, Any]) -> List[TextContent]:
+async def list_databases_handler(arguments: Dict[str, Any], bearer_token: str = None, request_id: str = None) -> List[TextContent]:
     """List all available databases"""
+    start_time = time.time()
     try:
         conn = get_environment_snowflake_connection()
         cursor = conn.cursor()
@@ -176,7 +215,16 @@ async def list_databases_handler(arguments: Dict[str, Any]) -> List[TextContent]
         cursor.close()
         conn.close()
         
-        await log_activity("list_databases", arguments, len(db_list))
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        await log_activity(
+            "list_databases", 
+            arguments, 
+            len(db_list),
+            execution_time_ms=execution_time_ms,
+            processing_stage="post",
+            bearer_token=bearer_token,
+            request_id=request_id
+        )
         
         # Use clean formatting
         from utils.response_formatters import format_list_results
@@ -187,8 +235,9 @@ async def list_databases_handler(arguments: Dict[str, Any]) -> List[TextContent]
         logging.error(f"list_databases error: {error}")
         return [TextContent(type="text", text=f"Failed to list databases: {str(error)}")]
 
-async def list_schemas_handler(arguments: Dict[str, Any]) -> List[TextContent]:
+async def list_schemas_handler(arguments: Dict[str, Any], bearer_token: str = None, request_id: str = None) -> List[TextContent]:
     """List schemas in a database"""
+    start_time = time.time()
     try:
         params = ListSchemasSchema(**arguments)
         
@@ -201,7 +250,16 @@ async def list_schemas_handler(arguments: Dict[str, Any]) -> List[TextContent]:
         cursor.close()
         conn.close()
         
-        await log_activity("list_schemas", arguments, len(schema_list))
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        await log_activity(
+            "list_schemas", 
+            arguments, 
+            len(schema_list),
+            execution_time_ms=execution_time_ms,
+            processing_stage="post",
+            bearer_token=bearer_token,
+            request_id=request_id
+        )
         
         # Use clean formatting
         from utils.response_formatters import format_list_results
@@ -212,8 +270,9 @@ async def list_schemas_handler(arguments: Dict[str, Any]) -> List[TextContent]:
         logging.error(f"list_schemas error: {error}")
         return [TextContent(type="text", text=f"Failed to list schemas: {str(error)}")]
 
-async def list_tables_handler(arguments: Dict[str, Any]) -> List[TextContent]:
+async def list_tables_handler(arguments: Dict[str, Any], bearer_token: str = None, request_id: str = None) -> List[TextContent]:
     """List tables in a database schema"""
+    start_time = time.time()
     try:
         params = ListTablesSchema(**arguments)
         
@@ -226,7 +285,16 @@ async def list_tables_handler(arguments: Dict[str, Any]) -> List[TextContent]:
         cursor.close()
         conn.close()
         
-        await log_activity("list_tables", arguments, len(table_list))
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        await log_activity(
+            "list_tables", 
+            arguments, 
+            len(table_list),
+            execution_time_ms=execution_time_ms,
+            processing_stage="post",
+            bearer_token=bearer_token,
+            request_id=request_id
+        )
         
         # Use clean formatting  
         from utils.response_formatters import format_list_results
@@ -237,8 +305,9 @@ async def list_tables_handler(arguments: Dict[str, Any]) -> List[TextContent]:
         logging.error(f"list_tables error: {error}")
         return [TextContent(type="text", text=f"Failed to list tables: {str(error)}")]
 
-async def describe_table_handler(arguments: Dict[str, Any]) -> List[TextContent]:
+async def describe_table_handler(arguments: Dict[str, Any], bearer_token: str = None, request_id: str = None) -> List[TextContent]:
     """Get detailed table schema"""
+    start_time = time.time()
     try:
         params = DescribeTableSchema(**arguments)
         
@@ -260,7 +329,16 @@ async def describe_table_handler(arguments: Dict[str, Any]) -> List[TextContent]
         cursor.close()
         conn.close()
         
-        await log_activity("describe_table", arguments, len(column_list))
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        await log_activity(
+            "describe_table", 
+            arguments, 
+            len(column_list),
+            execution_time_ms=execution_time_ms,
+            processing_stage="post",
+            bearer_token=bearer_token,
+            request_id=request_id
+        )
         
         # Use clean formatting
         from utils.response_formatters import format_schema_results
@@ -271,8 +349,9 @@ async def describe_table_handler(arguments: Dict[str, Any]) -> List[TextContent]
         logging.error(f"describe_table error: {error}")
         return [TextContent(type="text", text=f"Failed to describe table: {str(error)}")]
 
-async def read_query_handler(arguments: Dict[str, Any]) -> List[TextContent]:
+async def read_query_handler(arguments: Dict[str, Any], bearer_token: str = None, request_id: str = None) -> List[TextContent]:
     """Execute a read-only SQL query against Snowflake"""
+    start_time = time.time()
     try:
         params = ReadQuerySchema(**arguments)
         
@@ -304,7 +383,16 @@ async def read_query_handler(arguments: Dict[str, Any]) -> List[TextContent]:
         cursor.close()
         conn.close()
         
-        await log_activity("read_query", {"query": params.query}, len(result_list))
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        await log_activity(
+            "read_query", 
+            {"query": params.query}, 
+            len(result_list),
+            execution_time_ms=execution_time_ms,
+            processing_stage="post",
+            bearer_token=bearer_token,
+            request_id=request_id
+        )
         
         # Use clean formatting
         from utils.response_formatters import format_table_results
@@ -315,13 +403,23 @@ async def read_query_handler(arguments: Dict[str, Any]) -> List[TextContent]:
         logging.error(f"read_query error: {error}")
         return [TextContent(type="text", text=f"Query execution failed: {SqlValidator.format_database_error(error)}")]
 
-async def append_insight_handler(arguments: Dict[str, Any]) -> List[TextContent]:
+async def append_insight_handler(arguments: Dict[str, Any], bearer_token: str = None, request_id: str = None) -> List[TextContent]:
     """Add a data insight to the insights memo"""
+    start_time = time.time()
     try:
         params = AppendInsightSchema(**arguments)
         
         # For now, just return success - in production this would append to a memo resource
-        await log_activity("append_insight", arguments, 1)
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        await log_activity(
+            "append_insight", 
+            arguments, 
+            1,
+            execution_time_ms=execution_time_ms,
+            processing_stage="post",
+            bearer_token=bearer_token,
+            request_id=request_id
+        )
         
         result = f"Insight recorded successfully: {params.insight}"
         return [TextContent(type="text", text=result)]

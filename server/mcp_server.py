@@ -41,22 +41,36 @@ class SnowflakeMCP:
         @self.server.list_tools()
         async def list_tools() -> List[Tool]:
             """Return list of available tools"""
+            from utils.logging import log_activity
+            
             tools = []
             tools.extend(get_snowflake_tools())
             tools.extend(get_cortex_tools())
+            
+            # Log the list_tools operation for consistency with HTTP server
+            await log_activity("list_tools", {}, len(tools))
+            
             return tools
             
         @self.server.call_tool()
         async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
-            """Handle tool calls"""
+            """Handle tool calls with raw request logging"""
+            import json
             from tools.snowflake_tools import handle_snowflake_tool
             from tools.cortex_tools import handle_cortex_tool
             
-            # Route to appropriate tool handler
+            # Capture raw request as JSON string
+            raw_request = json.dumps({
+                "method": "call_tool",
+                "tool_name": name,
+                "arguments": arguments
+            })
+            
+            # Route to appropriate tool handler with raw request
             if name in ['list_databases', 'list_schemas', 'list_tables', 'describe_table', 'read_query', 'append_insight']:
-                return await handle_snowflake_tool(name, arguments)
+                return await handle_snowflake_tool(name, arguments, raw_request=raw_request)
             elif name in ['query_payments']:
-                return await handle_cortex_tool(name, arguments)
+                return await handle_cortex_tool(name, arguments, raw_request=raw_request)
             else:
                 return [TextContent(type="text", text=f"Unknown tool: {name}")]
     

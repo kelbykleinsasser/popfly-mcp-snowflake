@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from typing import Dict, Any, List
 from mcp.types import Tool, TextContent
 from pydantic import BaseModel, validator
@@ -47,19 +48,54 @@ def get_cortex_tools() -> List[Tool]:
         )
     ]
 
-async def handle_cortex_tool(tool_name: str, arguments: Dict[str, Any]) -> List[TextContent]:
-    """Handle Cortex tool calls"""
+async def handle_cortex_tool(tool_name: str, arguments: Dict[str, Any], bearer_token: str = None, raw_request: str = None) -> List[TextContent]:
+    """Handle Cortex tool calls with timing and pre/post logging"""
+    import uuid
+    
+    # Generate unique request ID to link pre and post entries
+    request_id = str(uuid.uuid4())
+    
+    # Log pre-processing stage with raw request
+    start_time = time.time()
+    await log_activity(
+        tool_name=tool_name,
+        arguments=arguments,
+        processing_stage="pre",
+        raw_request=raw_request,
+        bearer_token=bearer_token,
+        request_id=request_id
+    )
+    
     try:
         if tool_name == "query_payments":
-            return await query_payments_handler(arguments)
+            result = await query_payments_handler(arguments, bearer_token, start_time, request_id)
         else:
-            return [TextContent(type="text", text=f"Unknown Cortex tool: {tool_name}")]
+            result = [TextContent(type="text", text=f"Unknown Cortex tool: {tool_name}")]
+        
+        return result
+        
     except Exception as error:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        
+        # Log post-processing stage with error
+        await log_activity(
+            tool_name=tool_name,
+            arguments=arguments,
+            processing_stage="post",
+            execution_success=False,
+            execution_time_ms=execution_time_ms,
+            bearer_token=bearer_token,
+            request_id=request_id
+        )
+        
         logging.error(f"Error in {tool_name}: {error}")
         return [TextContent(type="text", text=f"Error: {str(error)}")]
 
-async def query_payments_handler(arguments: Dict[str, Any]) -> List[TextContent]:
+async def query_payments_handler(arguments: Dict[str, Any], bearer_token: str = None, start_time: float = None, request_id: str = None) -> List[TextContent]:
     """Query payment data using natural language via Snowflake Cortex"""
+    if start_time is None:
+        start_time = time.time()
+    
     try:
         params = QueryPaymentsSchema(**arguments)
         
@@ -74,7 +110,18 @@ async def query_payments_handler(arguments: Dict[str, Any]) -> List[TextContent]
         cortex_response = await CortexGenerator.generate_sql(cortex_request)
         
         if not cortex_response.success:
-            await log_activity("query_payments", arguments, 0, execution_success=False, natural_query=params.query)
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            await log_activity(
+                "query_payments", 
+                arguments, 
+                0, 
+                execution_success=False, 
+                natural_query=params.query,
+                execution_time_ms=execution_time_ms,
+                processing_stage="post",
+                bearer_token=bearer_token,
+                request_id=request_id
+            )
             return [TextContent(type="text", text=f"Failed to generate SQL: {cortex_response.error}")]
         
         # Execute the generated SQL
@@ -84,16 +131,21 @@ async def query_payments_handler(arguments: Dict[str, Any]) -> List[TextContent]
             "max_rows": params.max_rows
         }
         
-        # Execute the query
-        sql_results = await read_query_handler(sql_arguments)
+        # Execute the query (pass bearer_token for consistent logging)
+        sql_results = await read_query_handler(sql_arguments, bearer_token, request_id)
         
-        # Log the activity
+        # Calculate execution time and log the activity
+        execution_time_ms = int((time.time() - start_time) * 1000)
         await log_activity(
             "query_payments", 
             arguments, 
             execution_success=cortex_response.success,
             natural_query=params.query,
-            generated_sql=cortex_response.generated_sql
+            generated_sql=cortex_response.generated_sql,
+            execution_time_ms=execution_time_ms,
+            processing_stage="post",
+            bearer_token=bearer_token,
+            request_id=request_id
         )
         
         # Extract the actual data from the SQL results
@@ -122,6 +174,17 @@ async def query_payments_handler(arguments: Dict[str, Any]) -> List[TextContent]
         return [TextContent(type="text", text=f"**No Payment Records Found**\n\nNo payment records match your query: \"{params.query}\"")]
         
     except Exception as error:
+        execution_time_ms = int((time.time() - start_time) * 1000)
         logging.error(f"query_payments error: {error}")
-        await log_activity("query_payments", arguments, 0, execution_success=False, natural_query=arguments.get('query', ''))
+        await log_activity(
+            "query_payments", 
+            arguments, 
+            0, 
+            execution_success=False, 
+            natural_query=arguments.get('query', ''),
+            execution_time_ms=execution_time_ms,
+            processing_stage="post",
+            bearer_token=bearer_token,
+            request_id=request_id
+        )
         return [TextContent(type="text", text=f"Failed to process natural language query: {str(error)}")]

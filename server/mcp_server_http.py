@@ -137,6 +137,60 @@ async def health_check():
     )
 
 
+@app.get("/diagnostics")
+async def diagnostics(token: str = Depends(validate_auth)):
+    """Run diagnostics on the MCP server including logging capability"""
+    diagnostics_results = {
+        "environment": settings.environment,
+        "snowflake_connection": False,
+        "logging_capability": False,
+        "recent_logs_check": False,
+        "errors": []
+    }
+    
+    try:
+        # Test Snowflake connection
+        from utils.config import get_environment_snowflake_connection
+        conn = get_environment_snowflake_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1 as test")
+        cursor.fetchone()
+        diagnostics_results["snowflake_connection"] = True
+        
+        # Test logging capability by writing a test entry
+        test_insert = """
+        INSERT INTO AI_USER_ACTIVITY_LOG (
+            USER_EMAIL, ACTION_TYPE, ENTITY_TYPE, ENTITY_ID, 
+            ACTION_DETAILS, SUCCESS, EXECUTION_TIME_MS
+        )
+        SELECT 
+            'diagnostics@mcp.com', 'diagnostic_test', 'system', 'health_check',
+            PARSE_JSON('{"test": true}'), true, 0
+        """
+        cursor.execute(test_insert)
+        conn.commit()
+        diagnostics_results["logging_capability"] = True
+        
+        # Check if we can read recent logs
+        cursor.execute("""
+            SELECT COUNT(*) as log_count 
+            FROM AI_USER_ACTIVITY_LOG 
+            WHERE ACTION_TIMESTAMP > DATEADD(hour, -1, CURRENT_TIMESTAMP())
+        """)
+        result = cursor.fetchone()
+        diagnostics_results["recent_logs_check"] = True
+        diagnostics_results["recent_logs_count"] = result[0] if result else 0
+        
+        cursor.close()
+        conn.close()
+        
+    except Exception as error:
+        diagnostics_results["errors"].append(str(error))
+        logging.error(f"Diagnostics error: {error}", exc_info=True)
+    
+    return diagnostics_results
+
+
 @app.get("/tools")
 async def list_tools(request: Request, token: str = Depends(validate_auth)):
     """List all available MCP tools"""
@@ -177,14 +231,21 @@ async def call_tool(
         tool_name = request.name
         arguments = request.arguments
         
+        # Capture raw request as JSON string
+        raw_request = json.dumps({
+            "method": "tool_call",
+            "name": tool_name,
+            "arguments": arguments
+        })
+        
         # Log the tool call attempt
         logging.info(f"Tool call: {tool_name} with args: {arguments}")
         
-        # Route to appropriate tool handler based on tool name
+        # Route to appropriate tool handler based on tool name with raw request and bearer token
         if tool_name in ['list_databases', 'list_schemas', 'list_tables', 'describe_table', 'read_query', 'append_insight']:
-            result = await handle_snowflake_tool(tool_name, arguments)
+            result = await handle_snowflake_tool(tool_name, arguments, bearer_token=token, raw_request=raw_request)
         elif tool_name in ['query_payments']:
-            result = await handle_cortex_tool(tool_name, arguments)
+            result = await handle_cortex_tool(tool_name, arguments, bearer_token=token, raw_request=raw_request)
         else:
             await log_activity(tool_name, arguments, 0, execution_success=False, bearer_token=token)
             raise HTTPException(
