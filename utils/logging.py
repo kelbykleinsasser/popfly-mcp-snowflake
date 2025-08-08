@@ -115,11 +115,11 @@ async def log_activity(
         
     except Exception as error:
         # Log the full error with stack trace for debugging
-        logging.error(f"Failed to log activity for tool '{tool_name}': {error}", exc_info=True)
+        logging.error(f"Failed to log activity for tool '{tool_name}' (stage: {processing_stage}): {error}", exc_info=True)
         
-        # In production, also try to write to a fallback log
+        # In production, also try to write to a fallback log with more details
         if settings.environment == 'production':
-            logging.error(f"Activity log fallback - Tool: {tool_name}, Args: {arguments}, Success: {execution_success}")
+            logging.error(f"Activity log fallback - Tool: {tool_name}, Stage: {processing_stage}, RequestID: {request_id}, Args: {arguments}, Success: {execution_success}")
 
 async def log_cortex_usage(
     natural_query: str,

@@ -173,7 +173,7 @@ cat /path/to/private_key.pem | gcloud secrets versions add SNOWFLAKE_PRIVATE_KEY
 
 ## Key Learnings and Best Practices
 
-### 1. Always Use Static IPs for Cloud Run � External Services
+### 1. Always Use Static IPs for Cloud Run → External Services
 - Cloud Run uses dynamic IPs by default
 - For services requiring IP whitelisting (like Snowflake), always set up Cloud NAT with static IP
 - This ensures consistent, predictable connectivity
@@ -456,3 +456,50 @@ curl -I https://mcp.popfly.com/health
 6. **Create deployment script** that explicitly sets correct secret versions
 7. **Implement health checks** that verify Snowflake connectivity
 8. **Add service-to-service authentication** for Cloud Run services instead of bearer tokens
+
+---
+
+## Enhanced Logging Deployment Issue (2025-08-08)
+
+### Problem: Pre-processing Logs Not Being Created
+
+**Symptoms:**
+- Post-processing logs were being created successfully with new columns
+- Pre-processing logs were missing entirely or only occasionally appearing
+- NULL REQUEST_ID values in many log entries
+
+**Root Cause:**
+The enhanced logging code was deployed but pre-processing logs weren't being created because:
+1. The `handle_snowflake_tool` and `handle_cortex_tool` functions properly implement pre/post logging
+2. However, these are only called from the `/tools/call` endpoint 
+3. The `/tools` endpoint (list_tools) was still using the old `log_activity` signature without new parameters
+4. Some tools weren't receiving the `request_id` parameter properly, resulting in NULL values
+
+**Investigation Process:**
+```sql
+-- Check for pre/post entries
+SELECT 
+    COUNT(*) as COUNT,
+    PROCESSING_STAGE,
+    ACTION_TYPE
+FROM PF.BI.AI_USER_ACTIVITY_LOG
+WHERE TIMESTAMP > DATEADD(hour, -1, CURRENT_TIMESTAMP())
+  AND ACTION_TYPE = 'tool_execution'
+GROUP BY PROCESSING_STAGE, ACTION_TYPE;
+
+-- Result showed:
+-- 4 entries with NULL PROCESSING_STAGE (old format)
+-- 2 entries with "pre" 
+-- 6 entries with "post"
+```
+
+**Specific Issues Found:**
+1. `list_tools` endpoint wasn't updated to use new logging parameters
+2. Some Cortex tool calls had NULL REQUEST_ID
+3. The error handling in `log_activity` was silently swallowing exceptions
+
+**Solution:**
+Need to ensure ALL endpoints that call `log_activity` are updated with the new signature, and verify that request_id is being properly generated and passed through all code paths.
+
+**Lesson Learned:**
+When adding new required parameters to a logging function, must audit ALL call sites to ensure they're updated. Silent error handling in logging functions can mask deployment issues - better to have verbose error logging during deployment validation.

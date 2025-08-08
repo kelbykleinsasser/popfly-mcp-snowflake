@@ -208,7 +208,15 @@ async def list_tools(request: Request, token: str = Depends(validate_auth)):
                 "inputSchema": tool.inputSchema
             })
         
-        await log_activity("list_tools", {}, len(tools_list), bearer_token=token)
+        # Log list_tools activity with proper parameters
+        await log_activity(
+            tool_name="list_tools",
+            arguments={},
+            row_count=len(tools_list),
+            bearer_token=token,
+            processing_stage="post",
+            execution_success=True
+        )
         
         return {
             "success": True,
@@ -247,7 +255,14 @@ async def call_tool(
         elif tool_name in ['query_payments']:
             result = await handle_cortex_tool(tool_name, arguments, bearer_token=token, raw_request=raw_request)
         else:
-            await log_activity(tool_name, arguments, 0, execution_success=False, bearer_token=token)
+            await log_activity(
+                tool_name=tool_name,
+                arguments=arguments,
+                row_count=0,
+                execution_success=False,
+                bearer_token=token,
+                processing_stage="post"
+            )
             raise HTTPException(
                 status_code=404, 
                 detail=f"Unknown tool: {tool_name}. Available tools: list_databases, list_schemas, list_tables, describe_table, read_query, query_payments, append_insight"
@@ -269,8 +284,9 @@ async def call_tool(
                     "text": str(item)
                 })
         
-        # Log successful execution
-        await log_activity(tool_name, arguments, 1, execution_success=True, bearer_token=token)
+        # Log successful execution (Note: this is redundant as handlers log their own activity)
+        # Commenting out to avoid duplicate logs
+        # await log_activity(tool_name, arguments, 1, execution_success=True, bearer_token=token)
         
         return ToolResponse(
             success=True,
@@ -283,8 +299,9 @@ async def call_tool(
     except Exception as error:
         logging.error(f"Tool call failed: {tool_name} - {error}")
         
-        # Log failed execution
-        await log_activity(tool_name, arguments, 0, execution_success=False, bearer_token=token)
+        # Log failed execution (Note: handlers should have logged this already)
+        # Only log if not already logged by handler
+        # await log_activity(tool_name, arguments, 0, execution_success=False, bearer_token=token)
         
         return ToolResponse(
             success=False,

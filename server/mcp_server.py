@@ -48,7 +48,13 @@ class SnowflakeMCP:
             tools.extend(get_cortex_tools())
             
             # Log the list_tools operation for consistency with HTTP server
-            await log_activity("list_tools", {}, len(tools))
+            await log_activity(
+                tool_name="list_tools",
+                arguments={},
+                row_count=len(tools),
+                processing_stage="post",
+                execution_success=True
+            )
             
             return tools
             
