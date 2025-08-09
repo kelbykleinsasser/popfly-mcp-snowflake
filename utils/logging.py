@@ -19,7 +19,8 @@ async def log_activity(
     bearer_token: Optional[str] = None,
     processing_stage: Literal["pre", "post"] = "post",
     raw_request: Optional[str] = None,
-    request_id: Optional[str] = None
+    request_id: Optional[str] = None,
+    action_type: Optional[str] = None
 ):
     """Log MCP tool activity to AI_USER_ACTIVITY_LOG
     
@@ -35,6 +36,7 @@ async def log_activity(
         processing_stage: "pre" for raw request logging, "post" for after processing
         raw_request: Raw request string (for pre-processing stage)
         request_id: Unique ID to link pre and post processing entries
+        action_type: Override default action_type (e.g., "internal_tool_call")
     """
     try:
         conn = get_environment_snowflake_connection()
@@ -89,8 +91,9 @@ async def log_activity(
         # Convert raw_request to JSON string for VARIANT column (or None)
         raw_request_json = raw_request if raw_request else None
         
-        # Keep ACTION_TYPE simple, use PROCESSING_STAGE column for stage info
-        action_type = "tool_execution"
+        # Use provided action_type or default to "tool_execution"
+        if action_type is None:
+            action_type = "tool_execution"
         
         cursor.execute(insert_sql, (
             'mcp_server@popfly.com',  # Generic email for MCP server
@@ -141,11 +144,13 @@ async def log_cortex_usage(
             USER_EMAIL,
             FUNCTION_NAME,
             QUERY_TEXT,
+            GENERATED_SQL,
+            TARGET_OBJECT,
             SUCCESS,
             TOKENS_USED,
             EXECUTION_TIME_MS
         ) VALUES (
-            %s, %s, %s, %s, %s, %s
+            %s, %s, %s, %s, %s, %s, %s, %s
         )
         """
         
@@ -153,6 +158,8 @@ async def log_cortex_usage(
             'mcp_server@popfly.com',
             'COMPLETE',  # Using COMPLETE function
             natural_query,
+            generated_sql,
+            view_name,  # Using view_name parameter as target_object
             validation_passed,
             credits_used,  # Using as token approximation
             execution_time_ms

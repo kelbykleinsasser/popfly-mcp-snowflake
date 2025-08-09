@@ -8,6 +8,7 @@ from utils.config import get_environment_snowflake_connection
 from config.settings import settings
 from validators.sql_validator import SqlValidator, SqlValidationResult
 from utils.logging import log_cortex_usage
+from utils.prompt_builder import PromptBuilder
 
 class CortexRequest(BaseModel):
     natural_language_query: str
@@ -21,6 +22,10 @@ class CortexResponse(BaseModel):
     validation_result: Optional[SqlValidationResult] = None
     error: Optional[str] = None
     cortex_credits_used: Optional[float] = None
+    # Prompt metadata (optional)
+    prompt_id: Optional[str] = None
+    prompt_char_count: Optional[int] = None
+    relevant_columns_k: Optional[int] = None
 
 class CortexGenerator:
     """Snowflake Cortex SQL generation with security validation"""
@@ -56,11 +61,21 @@ class CortexGenerator:
                     error=f"View '{request.view_name}' not configured for Cortex generation"
                 )
             
-            # Build Cortex prompt
-            prompt = cls.build_cortex_prompt(request, constraints)
+            # Build Cortex prompt (DB-driven with graceful fallback)
+            built = PromptBuilder.build_prompt_for_view(
+                view_name=request.view_name,
+                user_query=request.natural_language_query,
+                max_rows=request.max_rows,
+                allowed_ops=constraints["allowed_operations"],
+                allowed_columns=constraints["allowed_columns"],
+            )
+            prompt = built.prompt_text
             
-            # Execute Cortex SQL generation
+            # Execute Cortex SQL generation (measure generation latency)
+            import time
+            start_gen = time.time()
             generated_sql = await cls.call_cortex_complete(prompt)
+            generation_time_ms = int((time.time() - start_gen) * 1000)
             
             # Validate generated SQL
             validation_result = SqlValidator.validate_sql_query(generated_sql)
@@ -70,14 +85,18 @@ class CortexGenerator:
                 natural_query=request.natural_language_query,
                 generated_sql=generated_sql,
                 validation_passed=validation_result.is_valid,
-                view_name=request.view_name
+                view_name=request.view_name,
+                execution_time_ms=generation_time_ms
             )
             
             return CortexResponse(
                 success=validation_result.is_valid,
                 generated_sql=generated_sql,
                 validation_result=validation_result,
-                error=validation_result.error if not validation_result.is_valid else None
+                error=validation_result.error if not validation_result.is_valid else None,
+                prompt_id=built.prompt_id,
+                prompt_char_count=built.prompt_char_count,
+                relevant_columns_k=built.relevant_columns_k
             )
             
         except Exception as error:

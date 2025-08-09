@@ -1,0 +1,84 @@
+{
+  "database": "PF",
+  "schema": "BI",
+  "view_name": "V_CREATOR_PAYMENTS_UNION",
+  "ddl": "create or replace view V_CREATOR_PAYMENTS_UNION(\n\tPAYMENT_TYPE,\n\tREFERENCE_ID,\n\tREFERENCE_TYPE,\n\tSTRIPE_CONNECTED_ACCOUNT_ID,\n\tSTRIPE_CUSTOMER_ID,\n\tUSER_ID,\n\tCREATOR_NAME,\n\tSTRIPE_CONNECTED_ACCOUNT_NAME,\n\tSTRIPE_CUSTOMER_NAME,\n\tCOMPANY_NAME,\n\tCAMPAIGN_NAME,\n\tPAYMENT_STATUS,\n\tPAYMENT_AMOUNT,\n\tPAYMENT_DATE,\n\tCREATED_DATE\n) as\nSelect * From V_CREATOR_PAYMENTS_DIRECTMODE\nUNION\nSelect * From V_CREATOR_PAYMENTS_AGENCYMODE\nUNION\nSelect * From V_CREATOR_PAYMENTS_UNASSIGNED;",
+  "table_usage": [],
+  "column_lineage": [
+    {
+      "column_name": "PAYMENT_TYPE",
+      "sources": [],
+      "notes": "No explicit base column usage reported; likely derived/CASE/constant."
+    },
+    {
+      "column_name": "REFERENCE_ID",
+      "sources": [],
+      "notes": "No explicit base column usage reported; likely derived/CASE/constant."
+    },
+    {
+      "column_name": "REFERENCE_TYPE",
+      "sources": [],
+      "notes": "No explicit base column usage reported; likely derived/CASE/constant."
+    },
+    {
+      "column_name": "STRIPE_CONNECTED_ACCOUNT_ID",
+      "sources": [],
+      "notes": "No explicit base column usage reported; likely derived/CASE/constant."
+    },
+    {
+      "column_name": "STRIPE_CUSTOMER_ID",
+      "sources": [],
+      "notes": "No explicit base column usage reported; likely derived/CASE/constant."
+    },
+    {
+      "column_name": "USER_ID",
+      "sources": [],
+      "notes": "No explicit base column usage reported; likely derived/CASE/constant."
+    },
+    {
+      "column_name": "CREATOR_NAME",
+      "sources": [],
+      "notes": "No explicit base column usage reported; likely derived/CASE/constant."
+    },
+    {
+      "column_name": "STRIPE_CONNECTED_ACCOUNT_NAME",
+      "sources": [],
+      "notes": "No explicit base column usage reported; likely derived/CASE/constant."
+    },
+    {
+      "column_name": "STRIPE_CUSTOMER_NAME",
+      "sources": [],
+      "notes": "No explicit base column usage reported; likely derived/CASE/constant."
+    },
+    {
+      "column_name": "COMPANY_NAME",
+      "sources": [],
+      "notes": "No explicit base column usage reported; likely derived/CASE/constant."
+    },
+    {
+      "column_name": "CAMPAIGN_NAME",
+      "sources": [],
+      "notes": "No explicit base column usage reported; likely derived/CASE/constant."
+    },
+    {
+      "column_name": "PAYMENT_STATUS",
+      "sources": [],
+      "notes": "No explicit base column usage reported; likely derived/CASE/constant."
+    },
+    {
+      "column_name": "PAYMENT_AMOUNT",
+      "sources": [],
+      "notes": "No explicit base column usage reported; likely derived/CASE/constant."
+    },
+    {
+      "column_name": "PAYMENT_DATE",
+      "sources": [],
+      "notes": "No explicit base column usage reported; likely derived/CASE/constant."
+    },
+    {
+      "column_name": "CREATED_DATE",
+      "sources": [],
+      "notes": "No explicit base column usage reported; likely derived/CASE/constant."
+    }
+  ]
+}

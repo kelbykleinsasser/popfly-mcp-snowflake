@@ -63,7 +63,8 @@ async def handle_cortex_tool(tool_name: str, arguments: Dict[str, Any], bearer_t
         processing_stage="pre",
         raw_request=raw_request,
         bearer_token=bearer_token,
-        request_id=request_id
+        request_id=request_id,
+        natural_query=arguments.get('query') if tool_name == 'query_payments' else None
     )
     
     try:
@@ -131,14 +132,19 @@ async def query_payments_handler(arguments: Dict[str, Any], bearer_token: str = 
             "max_rows": params.max_rows
         }
         
-        # Execute the query (pass bearer_token for consistent logging)
-        sql_results = await read_query_handler(sql_arguments, bearer_token, request_id)
+        # Execute the query (pass bearer_token for consistent logging, mark as internal)
+        sql_results = await read_query_handler(sql_arguments, bearer_token, request_id, is_internal=True)
         
         # Calculate execution time and log the activity
         execution_time_ms = int((time.time() - start_time) * 1000)
         await log_activity(
             "query_payments", 
-            arguments, 
+            {
+                **arguments,
+                "prompt_id": cortex_response.prompt_id,
+                "prompt_char_count": cortex_response.prompt_char_count,
+                "relevant_columns_k": cortex_response.relevant_columns_k,
+            }, 
             execution_success=cortex_response.success,
             natural_query=params.query,
             generated_sql=cortex_response.generated_sql,
@@ -154,9 +160,12 @@ async def query_payments_handler(arguments: Dict[str, Any], bearer_token: str = 
             import re
             sql_text = sql_results[0].text
             
+            # Log the raw SQL result for debugging
+            logging.info(f"SQL result text (first 500 chars): {sql_text[:500]}")
+            
             # Extract JSON from the SQL result text
             if "rows returned:" in sql_text:
-                json_match = re.search(r'rows returned:\s*(\[.*\])', sql_text, re.DOTALL)
+                json_match = re.search(r'\d+\s+rows returned:\s*(\[.*\])', sql_text, re.DOTALL)
                 if json_match:
                     try:
                         import json

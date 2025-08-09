@@ -74,6 +74,12 @@ class AppendInsightSchema(BaseModel):
 
 def get_snowflake_tools() -> List[Tool]:
     """Return list of Snowflake tool definitions"""
+    # Temporarily disabled - only query_payments is exposed to LLM
+    # Uncomment the return statement below to re-enable these tools
+    return []
+    
+    # Original tools - preserved for future use
+    """
     return [
         Tool(
             name="list_databases",
@@ -142,6 +148,7 @@ def get_snowflake_tools() -> List[Tool]:
             }
         )
     ]
+    """
 
 async def handle_snowflake_tool(tool_name: str, arguments: Dict[str, Any], bearer_token: str = None, raw_request: str = None) -> List[TextContent]:
     """Handle Snowflake tool calls with timing and pre/post logging"""
@@ -349,7 +356,7 @@ async def describe_table_handler(arguments: Dict[str, Any], bearer_token: str = 
         logging.error(f"describe_table error: {error}")
         return [TextContent(type="text", text=f"Failed to describe table: {str(error)}")]
 
-async def read_query_handler(arguments: Dict[str, Any], bearer_token: str = None, request_id: str = None) -> List[TextContent]:
+async def read_query_handler(arguments: Dict[str, Any], bearer_token: str = None, request_id: str = None, is_internal: bool = False) -> List[TextContent]:
     """Execute a read-only SQL query against Snowflake"""
     start_time = time.time()
     try:
@@ -391,13 +398,21 @@ async def read_query_handler(arguments: Dict[str, Any], bearer_token: str = None
             execution_time_ms=execution_time_ms,
             processing_stage="post",
             bearer_token=bearer_token,
-            request_id=request_id
+            request_id=request_id,
+            action_type="internal_tool_call" if is_internal else None
         )
         
-        # Use clean formatting
-        from utils.response_formatters import format_table_results
-        clean_result = format_table_results(result_list, f"Query: {params.query}")
-        return [TextContent(type="text", text=clean_result)]
+        # Return raw data for internal calls, formatted for external
+        if is_internal:
+            # Return raw JSON data for internal processing
+            import json
+            raw_json = json.dumps(result_list, default=str)
+            return [TextContent(type="text", text=f"{len(result_list)} rows returned: {raw_json}")]
+        else:
+            # Use clean formatting for external calls
+            from utils.response_formatters import format_table_results
+            clean_result = format_table_results(result_list, f"Query: {params.query}")
+            return [TextContent(type="text", text=clean_result)]
         
     except Exception as error:
         logging.error(f"read_query error: {error}")

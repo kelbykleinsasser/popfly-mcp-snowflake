@@ -18,7 +18,13 @@ def format_payment_results(results: List[Dict[str, Any]], query: str) -> str:
         if payment.get('COMPANY_NAME'):
             payment_text += f" ({payment['COMPANY_NAME']})"
         
-        payment_text += f"\n• Amount: ${payment.get('PAYMENT_AMOUNT', 0):,.2f}"
+        amount = payment.get('PAYMENT_AMOUNT', 0)
+        if isinstance(amount, str):
+            try:
+                amount = float(amount)
+            except (ValueError, TypeError):
+                amount = 0
+        payment_text += f"\n• Amount: ${amount:,.2f}"
         payment_text += f"\n• Date: {payment.get('PAYMENT_DATE', 'Unknown')}"
         payment_text += f"\n• Status: {payment.get('PAYMENT_STATUS', 'Unknown')}"
         
@@ -26,7 +32,15 @@ def format_payment_results(results: List[Dict[str, Any]], query: str) -> str:
             payment_text += f"\n• Campaign: {payment['CAMPAIGN_NAME']}"
             
         formatted_results.append(payment_text)
-        total_amount += payment.get('PAYMENT_AMOUNT', 0)
+        
+        # Add to total, handling string amounts
+        amt = payment.get('PAYMENT_AMOUNT', 0)
+        if isinstance(amt, str):
+            try:
+                amt = float(amt)
+            except (ValueError, TypeError):
+                amt = 0
+        total_amount += amt
     
     result_text = f"**Found {len(results)} Payment Record{'s' if len(results) != 1 else ''}**\n\n"
     result_text += "\n\n".join(formatted_results)
