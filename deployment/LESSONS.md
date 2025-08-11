@@ -597,3 +597,69 @@ Need to ensure ALL endpoints that call `log_activity` are updated with the new s
 
 **Lesson Learned:**
 When adding new required parameters to a logging function, must audit ALL call sites to ensure they're updated. Silent error handling in logging functions can mask deployment issues - better to have verbose error logging during deployment validation.
+
+---
+
+## Open WebUI Integration Configuration (2025-08-11)
+
+### Problem: Connection Failed When Adding MCP Server to Open WebUI
+
+**Symptoms:**
+- Open WebUI showed "Connection failed" when trying to add the MCP server
+- Server was accessible via curl but not from Open WebUI interface
+- OpenAPI spec was properly served at `/openapi.json`
+
+**Root Cause:**
+Open WebUI automatically appends `/openapi.json` to whatever base URL is provided. When users enter the full path `https://mcp.popfly.com/openapi.json`, it results in a request to `//openapi.json` which returns 404.
+
+**Investigation:**
+```bash
+# Server logs showed the issue:
+Aug 11 16:29:29 mcp-snowflake-vm python[7305]: Request from 34.96.47.56: GET //openapi.json
+Aug 11 16:29:29 mcp-snowflake-vm python[7305]: "GET //openapi.json HTTP/1.1" 404 Not Found
+```
+
+**Solution:**
+Enter ONLY the base URL in Open WebUI configuration:
+- ✅ **Correct**: `https://mcp.popfly.com`
+- ❌ **Wrong**: `https://mcp.popfly.com/openapi.json`
+
+### Correct Open WebUI Configuration
+
+**In the Edit Connection dialog:**
+- **URL**: `https://mcp.popfly.com` (base URL only, no paths)
+- **Auth**: Bearer
+- **Bearer Token**: [Your API key from GCP Secret Manager]
+- **Name**: Popfly MCP
+- **Visibility**: Public (or as needed)
+
+**Critical Points:**
+1. Open WebUI automatically appends `/openapi.json` to the base URL
+2. The server must have CORS properly configured (`allow_origins=["*"]` for broad compatibility)
+3. The OpenAPI spec must include a `servers` field with the correct base URL
+4. Bearer token authentication must be properly configured
+
+### FastAPI Configuration for Open WebUI
+
+**Required FastAPI setup:**
+```python
+app = FastAPI(
+    title="Snowflake MCP Server",
+    version="1.0.0",
+    servers=[
+        {"url": "https://mcp.popfly.com", "description": "Production server"},
+    ]
+)
+
+# CORS must allow Open WebUI's domain or use wildcard
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Or specific Open WebUI domain
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+```
+
+**Lesson Learned:**
+Always provide only the base URL to Open WebUI - it handles path construction internally. Double-check server logs when debugging integration issues to see the actual request paths being made.

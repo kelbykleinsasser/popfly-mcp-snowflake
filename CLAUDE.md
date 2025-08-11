@@ -24,7 +24,7 @@ This guide provides implementation patterns and standards for building a Python-
 
 ## Project Architecture
 
-**IMPORTANT: This is a Python-based MCP server with Snowflake integration and Open WebUI authentication.**
+**IMPORTANT: This is a Python-based MCP server deployed on GCP VM with stdio communication.**
 
 ### Current Project Structure
 
@@ -38,7 +38,7 @@ This guide provides implementation patterns and standards for building a Python-
 │   └── secret_manager.py         # GCP Secret Manager integration
 ├── server/                       # MCP server implementation
 │   ├── __init__.py
-│   ├── mcp_server.py            # Main MCP server
+│   ├── mcp_server.py            # Main MCP server (stdio-based)
 │   └── handlers.py              # Request handlers
 ├── cortex/                      # Snowflake Cortex integration
 │   ├── __init__.py
@@ -51,9 +51,6 @@ This guide provides implementation patterns and standards for building a Python-
 ├── validators/                  # Security validation
 │   ├── __init__.py
 │   └── sql_validator.py        # SQL validation for security
-├── auth_middleware/             # Open WebUI authentication
-│   ├── __init__.py
-│   └── bearer_auth.py          # Bearer token validation
 ├── utils/                       # Utilities
 │   ├── __init__.py
 │   ├── logging.py              # Activity logging
@@ -61,7 +58,11 @@ This guide provides implementation patterns and standards for building a Python-
 │   └── config.py               # Environment configuration
 ├── config/                      # Configuration
 │   ├── __init__.py
-│   └── settings.py             # Environment settings
+│   └── settings.py             # Environment settings with GCP Secret Manager
+├── deployment/                  # Deployment documentation
+│   ├── current_deployment.md   # Current VM deployment details
+│   ├── LESSONS.md              # Historical issues and solutions
+│   └── deployment_instructions_mcp.md # Generic VM deployment guide
 ├── initialsetup/                # Database setup
 │   └── sql/
 │       ├── 01_create_ai_tables.sql
@@ -73,8 +74,7 @@ This guide provides implementation patterns and standards for building a Python-
 │   ├── test_cortex_generation.py
 │   ├── test_sql_validation.py
 │   └── test_integration.py
-├── examples/                    # Reference implementations
-├── PRPs/                        # Product Requirement Prompts
+├── deploy_to_vm.sh             # VM deployment script
 ├── .env.example                 # Environment template
 ├── requirements.txt             # Python dependencies
 ├── README.md                    # Project documentation
@@ -103,18 +103,28 @@ mypy .                          # Type checking
 
 ### Environment Configuration
 
-**Environment Variables Setup:**
+**Local Development Setup:**
 
 ```bash
 # Create .env file for local development
 cp .env.example .env
+# Edit .env with your local Snowflake credentials
+```
 
-# Production secrets (via GCP Secret Manager)
+**Production Deployment:**
+
+```bash
+# Deploy to VM (from local machine)
+./deploy_to_vm.sh
+
+# Secrets are stored in GCP Secret Manager (project: popfly-mcp-servers)
 # - SNOWFLAKE_ACCOUNT
 # - SNOWFLAKE_USER
 # - SNOWFLAKE_PRIVATE_KEY
-# - SNOWFLAKE_PRIVATE_KEY_PASSPHRASE
-# - OPEN_WEBUI_API_KEY
+# - SNOWFLAKE_DATABASE
+# - SNOWFLAKE_SCHEMA
+# - SNOWFLAKE_WAREHOUSE
+# - SNOWFLAKE_ROLE
 ```
 
 ## MCP Development Context
@@ -133,9 +143,9 @@ cp .env.example .env
 
 **Google Cloud Platform:**
 
+- **Compute Engine** - VM hosting (mcp-snowflake-vm)
 - **Secret Manager** - Production secret management
-- **Cloud Run** - Serverless deployment
-- **Container Registry** - Docker image storage
+- **IAM** - Access control and service accounts
 
 ### MCP Server Architecture
 
@@ -179,13 +189,34 @@ npx @modelcontextprotocol/inspector@latest python -m server.mcp_server
 ```json
 {
   "mcpServers": {
-    "snowflake-mcp": {
+    "snowflake-local": {
       "command": "python",
       "args": ["-m", "server.mcp_server"],
       "cwd": "/path/to/snowflake-mcp",
       "env": {
         "PYTHONPATH": "/path/to/snowflake-mcp"
       }
+    }
+  }
+}
+```
+
+**For Production (VM-based):**
+
+```json
+{
+  "mcpServers": {
+    "snowflake-prod": {
+      "command": "gcloud",
+      "args": [
+        "compute",
+        "ssh",
+        "mcp-snowflake-vm",
+        "--zone=us-central1-a",
+        "--project=popfly-mcp-servers",
+        "--command",
+        "cd /opt/mcp-snowflake && ./run_mcp.sh"
+      ]
     }
   }
 }

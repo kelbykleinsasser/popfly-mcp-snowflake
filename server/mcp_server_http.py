@@ -19,8 +19,7 @@ from config.settings import settings
 from utils.config import setup_logging
 from auth_middleware.bearer_auth import validate_bearer_token
 from auth_middleware.simple_auth import validate_auth
-from tools.snowflake_tools import handle_snowflake_tool, get_snowflake_tools
-from tools.cortex_tools import handle_cortex_tool, get_cortex_tools
+from tools.dynamic_registry import initialize_registry, get_registry
 from utils.logging import log_activity
 
 
@@ -74,6 +73,14 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("⏩ Skipping Snowflake connection test in production (IP whitelisting required first)")
     
+    # Initialize dynamic tool registry
+    try:
+        initialize_registry()
+        logger.info("✅ Dynamic tool registry initialized")
+    except Exception as error:
+        logger.error(f"❌ Failed to initialize dynamic tool registry: {error}")
+        # Continue with fallback to static tools
+    
     logger.info("🚀 HTTP MCP Server initialized successfully")
     yield
     logger.info("🛑 HTTP MCP Server shutting down")
@@ -84,13 +91,17 @@ app = FastAPI(
     title="Snowflake MCP Server",
     description="HTTP-based MCP server for Snowflake database operations with natural language queries",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    servers=[
+        {"url": "https://mcp.popfly.com", "description": "Production server"},
+    ],
+    root_path=""
 )
 
 # Add CORS middleware for Open WebUI
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://ai.popfly.com", "https://mcp.popfly.com"],  # Restrict to known domains
+    allow_origins=["*"],  # Allow all origins for Open WebUI compatibility
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -193,12 +204,29 @@ async def diagnostics(token: str = Depends(validate_auth)):
 
 
 @app.get("/tools")
-async def list_tools(request: Request, token: str = Depends(validate_auth)):
-    """List all available MCP tools"""
+@app.get("/{group_path}/tools")
+async def list_tools(request: Request, token: str = Depends(validate_auth), group_path: str = None):
+    """List all available MCP tools for a specific group"""
     try:
-        tools = []
-        tools.extend(get_snowflake_tools())
-        tools.extend(get_cortex_tools())
+        registry = get_registry()
+        
+        # Use dynamic registry - no fallback to static tools
+        if registry and registry.tools:
+            # Extract group from path
+            group = group_path or 'default'
+            
+            # Validate group exists
+            if group_path and not registry.is_valid_group(group):
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Unknown group: {group}. Valid groups are: default, admins, accountmanagers"
+                )
+            
+            tools = registry.get_tools_for_group(group)
+        else:
+            # No tools available if registry fails
+            logging.error("Tool registry not available - no tools to list")
+            tools = []
         
         # Convert MCP Tool objects to JSON-serializable format
         tools_list = []
@@ -212,7 +240,7 @@ async def list_tools(request: Request, token: str = Depends(validate_auth)):
         # Log list_tools activity with proper parameters
         await log_activity(
             tool_name="list_tools",
-            arguments={},
+            arguments={"group": group_path or 'default'},
             row_count=len(tools_list),
             bearer_token=token,
             processing_stage="post",
@@ -222,7 +250,8 @@ async def list_tools(request: Request, token: str = Depends(validate_auth)):
         return {
             "success": True,
             "tools": tools_list,
-            "count": len(tools_list)
+            "count": len(tools_list),
+            "group": group_path or 'default'
         }
     except Exception as error:
         logging.error(f"Error listing tools: {error}")
@@ -230,10 +259,12 @@ async def list_tools(request: Request, token: str = Depends(validate_auth)):
 
 
 @app.post("/tools/call", response_model=ToolResponse)
+@app.post("/{group_path}/tools/call", response_model=ToolResponse)
 async def call_tool(
     request: ToolCallRequest,
     req: Request, 
-    token: str = Depends(validate_auth)
+    token: str = Depends(validate_auth),
+    group_path: str = None
 ):
     """Call a specific MCP tool with arguments"""
     try:
@@ -244,18 +275,35 @@ async def call_tool(
         raw_request = json.dumps({
             "method": "tool_call",
             "name": tool_name,
-            "arguments": arguments
+            "arguments": arguments,
+            "group": group_path or 'default'
         })
         
         # Log the tool call attempt
-        logging.info(f"Tool call: {tool_name} with args: {arguments}")
+        logging.info(f"Tool call: {tool_name} with args: {arguments} for group: {group_path or 'default'}")
         
-        # Route to appropriate tool handler based on tool name with raw request and bearer token
-        if tool_name in ['list_databases', 'list_schemas', 'list_tables', 'describe_table', 'read_query', 'append_insight']:
-            result = await handle_snowflake_tool(tool_name, arguments, bearer_token=token, raw_request=raw_request)
-        elif tool_name in ['query_payments']:
-            result = await handle_cortex_tool(tool_name, arguments, bearer_token=token, raw_request=raw_request)
+        registry = get_registry()
+        
+        # Use dynamic registry only - no fallback
+        if registry and registry.tools:
+            group = group_path or 'default'
+            
+            # Validate group exists
+            if group_path and not registry.is_valid_group(group):
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Unknown group: {group}. Valid groups are: default, admins, accountmanagers"
+                )
+            
+            result = await registry.handle_tool_call(
+                tool_name, 
+                arguments, 
+                bearer_token=token, 
+                raw_request=raw_request,
+                group_path=group
+            )
         else:
+            # No registry available - cannot execute tools
             await log_activity(
                 tool_name=tool_name,
                 arguments=arguments,
@@ -265,8 +313,8 @@ async def call_tool(
                 processing_stage="post"
             )
             raise HTTPException(
-                status_code=404, 
-                detail=f"Unknown tool: {tool_name}. Available tools: list_databases, list_schemas, list_tables, describe_table, read_query, query_payments, append_insight"
+                status_code=503, 
+                detail="Tool registry not available - database connection may be down"
             )
         
         # Convert TextContent results to JSON format
@@ -329,9 +377,28 @@ async def root():
     }
 
 @app.get("/openapi.json")
-async def get_openapi():
+@app.get("/{group_path}/tools/openapi.json")
+async def get_openapi(group_path: str = None):
     """Return OpenAPI specification for Open WebUI integration"""
-    return app.openapi()
+    # Validate group path if provided
+    if group_path:
+        registry = get_registry()
+        if registry and not registry.is_valid_group(group_path):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Unknown group: {group_path}. Valid groups are: default, admins, accountmanagers"
+            )
+    
+    # Customize OpenAPI spec based on group if needed
+    openapi_schema = app.openapi()
+    
+    # Add group-specific server URL if accessed via group path
+    if group_path:
+        openapi_schema["servers"] = [
+            {"url": f"https://mcp.popfly.com/{group_path}", "description": f"{group_path.title()} group server"}
+        ]
+    
+    return openapi_schema
 
 
 # Open WebUI compatible endpoints
