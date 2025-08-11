@@ -104,8 +104,13 @@ The system uses three core tables with auto-incrementing IDs:
 
 | Tool Name | Type | Groups | Description |
 |-----------|------|--------|-------------|
-| read_query | Shared | All | Execute SQL SELECT queries directly |
 | query_payments | Restricted | Admins, Account Managers | Natural language payment queries using Cortex AI |
+
+### Internal-Only Tools
+
+| Tool Name | Description | Usage |
+|-----------|-------------|-------|
+| read_query | Execute SQL SELECT queries directly | Called internally by other tools like query_payments. Not exposed to LLM to prevent arbitrary SQL execution |
 
 ### User Groups
 
@@ -264,12 +269,12 @@ The system is now 100% database-driven with no hardcoded tool definitions:
 - **Explicit Failure**: If database is down, the system fails clearly (HTTP 503) rather than running with partial functionality
 - **Simplicity**: No need to maintain two parallel tool definition systems
 
-### Why Shared Tools?
+### Why Internal-Only Tools?
 
-Some tools should be universally available:
-- `read_query`: Basic SQL access needed by all groups
-- Reduces configuration overhead
-- Prevents accidental lockout scenarios
+Some tools should only be callable by other tools, not directly by the LLM:
+- `read_query`: Prevents users from writing arbitrary SQL while still allowing AI-generated queries
+- Provides controlled database access through natural language interfaces
+- Maintains security while enabling powerful functionality
 
 ### Cortex Integration
 

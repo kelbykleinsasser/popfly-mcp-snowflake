@@ -11,9 +11,9 @@ Different user groups access different tool sets through specific URL paths:
 
 | User Group | URL | Available Tools |
 |------------|-----|-----------------|
-| Default Users | `https://mcp.popfly.com/tools` | Shared tools only (read_query) |
-| Admins | `https://mcp.popfly.com/admins/tools` | All tools including query_payments |
-| Account Managers | `https://mcp.popfly.com/accountmanagers/tools` | Shared tools + query_payments |
+| Default Users | `https://mcp.popfly.com/tools` | No tools currently (expandable via database) |
+| Admins | `https://mcp.popfly.com/admins/tools` | query_payments |
+| Account Managers | `https://mcp.popfly.com/accountmanagers/tools` | query_payments |
 
 ### 1. In Open WebUI Admin Panel
 Navigate to **Admin Panel** → **Settings** → **Connections** → **+ Add Connection**
@@ -45,8 +45,9 @@ Tools are dynamically loaded from the database based on group membership:
 
 | Tool | Description | Groups | Example Usage |
 |------|-------------|--------|---------------|
-| `read_query` | Execute SELECT queries | All groups (shared) | "SELECT COUNT(*) FROM PF.BI.PAYMENTS" |
 | `query_payments` | Natural language payment queries using AI | Admins, Account Managers | "Show me total payments by month" |
+
+**Note**: `read_query` is an internal-only tool used by `query_payments` to execute generated SQL. It's not exposed directly to prevent arbitrary SQL execution.
 
 **Note**: Additional tools can be added to the database without code changes. The system is fully dynamic.
 
