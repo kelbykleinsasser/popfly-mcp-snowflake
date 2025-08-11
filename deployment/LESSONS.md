@@ -459,6 +459,100 @@ curl -I https://mcp.popfly.com/health
 
 ---
 
+## Migration from Cloud Run to VM-based Deployment (2025-08-11)
+
+### Context
+Migrated from container-based Cloud Run deployment to VM-based deployment for MCP server to:
+- Simplify deployment and debugging
+- Avoid cold starts and container lifecycle issues
+- Enable direct SSH access for troubleshooting
+- Support stdio-based MCP protocol properly
+
+### New Infrastructure Details
+- **GCP Project**: `popfly-mcp-servers` (new dedicated project)
+- **VM Instance**: `mcp-snowflake-vm` in `us-central1-a`
+- **Machine Type**: `e2-medium`
+- **Static IP**: `104.198.62.220`
+- **Service Account**: `mcp-snowflake-vm@popfly-mcp-servers.iam.gserviceaccount.com`
+
+### Key Changes Made
+
+1. **Created New GCP Project**
+   - Separated MCP services from main application (`popfly-open-webui`)
+   - Better resource organization and billing tracking
+
+2. **VM Setup**
+   ```bash
+   gcloud compute instances create mcp-snowflake-vm \
+       --zone=us-central1-a \
+       --machine-type=e2-medium \
+       --network-interface=network-tier=PREMIUM,subnet=default,address=104.198.62.220 \
+       --service-account=mcp-snowflake-vm@popfly-mcp-servers.iam.gserviceaccount.com \
+       --scopes=https://www.googleapis.com/auth/cloud-platform
+   ```
+
+3. **Updated Snowflake Network Rule**
+   - Added new VM IP: `104.198.62.220`
+   - Removed old Cloud NAT IP: `34.63.149.139`
+   - Current rule: `ALLOW_POPFLY_MCP` contains `('216.16.8.56', '104.198.62.220')`
+
+4. **Secret Management**
+   - Secrets now in `popfly-mcp-servers` project
+   - Modified `config/settings.py` to load from GCP Secret Manager when `USE_GCP_SECRETS=true`
+   - Secrets automatically loaded at runtime, not via environment variables
+
+5. **Deployment Script**
+   - Created `deploy_to_vm.sh` for quick deployments
+   - Deploys in ~10 seconds via tar archive and SSH
+
+### Cleaned Up Old Infrastructure
+- Deleted Cloud Run service `snowflake-mcp-server`
+- Deleted VPC Connector `snowflake-mcp-connector`
+- Deleted Cloud NAT `snowflake-mcp-nat`
+- Deleted Cloud Router `snowflake-mcp-router`
+- Deleted Static IP `snowflake-mcp-nat-ip` (34.63.149.139)
+- Removed domain mapping for `mcp.popfly.com`
+- **Note**: DNS CNAME for `mcp.popfly.com` still points to `ghs.googlehosted.com` - needs removal
+
+### How MCP Server Now Works
+1. MCP server runs on-demand via SSH (stdio mode)
+2. No longer exposed via HTTP/HTTPS
+3. Claude Desktop can connect via:
+   ```json
+   {
+     "mcpServers": {
+       "snowflake-prod": {
+         "command": "gcloud",
+         "args": [
+           "compute",
+           "ssh",
+           "mcp-snowflake-vm",
+           "--zone=us-central1-a",
+           "--project=popfly-mcp-servers",
+           "--command",
+           "cd /opt/mcp-snowflake && ./run_mcp.sh"
+         ]
+       }
+     }
+   }
+   ```
+
+### Files Removed
+- `Dockerfile`
+- `cloudbuild.yaml`
+- `docker-compose.yml`
+- `README_HTTP.md`
+- `start_http_server.py`
+
+### Benefits of New Approach
+- **No cold starts**: VM is always running
+- **Direct SSH access**: Easy debugging and log viewing
+- **Simpler secrets**: Direct file system access
+- **Faster deployments**: 10-second rsync vs multi-minute container builds
+- **Better for MCP**: Designed for stdio communication, not HTTP
+
+---
+
 ## Enhanced Logging Deployment Issue (2025-08-08)
 
 ### Problem: Pre-processing Logs Not Being Created
