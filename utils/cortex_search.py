@@ -232,12 +232,35 @@ class CortexSearchClient:
             if columns:
                 context_parts.append("Relevant columns:\n" + "\n".join(f"- {c}" for c in columns))
         else:
-            # If no search results, provide essential columns
-            context_parts.append("""Key columns:
-- PAYMENT_TYPE: Business model (Agency Mode, Direct Mode)
-- PAYMENT_AMOUNT: Payment amount
-- PAYMENT_DATE: Date of payment
-- PAYMENT_STATUS: Status of payment""")
+            # If no search results, get some key columns from database
+            try:
+                with get_pooled_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        SELECT COLUMN_NAME, BUSINESS_MEANING, EXAMPLES
+                        FROM PF.BI.AI_SCHEMA_METADATA
+                        WHERE TABLE_NAME = %s
+                        AND COLUMN_NAME IN (
+                            SELECT COLUMN_NAME 
+                            FROM PF.BI.AI_SCHEMA_METADATA 
+                            WHERE TABLE_NAME = %s
+                            ORDER BY CREATED_AT 
+                            LIMIT 5
+                        )
+                    """, (view_name, view_name))
+                    
+                    default_cols = []
+                    for row in cursor.fetchall():
+                        col_desc = f"{row[0]}: {row[1]}"
+                        if row[2]:
+                            col_desc += f" ({row[2][:30]}...)" if len(row[2]) > 30 else f" ({row[2]})"
+                        default_cols.append(f"- {col_desc}")
+                    
+                    if default_cols:
+                        context_parts.append("Key columns:\n" + "\n".join(default_cols))
+                    cursor.close()
+            except Exception as e:
+                logging.warning(f"Failed to get default columns: {e}")
         
         # Get business context
         business_results = cls.search_business_context(query)

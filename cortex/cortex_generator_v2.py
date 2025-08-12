@@ -56,12 +56,10 @@ class CortexGenerator:
                     request.view_name
                 )
                 
-                # Build minimal prompt with hints
+                # Build minimal prompt
                 prompt = f"""You are a Snowflake SQL expert for {request.view_name}.
 
 {relevant_context}
-
-Important: For business model, use PAYMENT_TYPE column (values: 'Agency Mode', 'Direct Mode').
 
 User query: "{request.natural_language_query}"
 

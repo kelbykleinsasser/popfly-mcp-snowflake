@@ -156,7 +156,7 @@ async def health_check():
     )
 
 
-@app.get("/diagnostics")
+@app.get("/diagnostics", operation_id="diagnostics_get")
 async def diagnostics(token: str = Depends(validate_auth)):
     """Run diagnostics on the MCP server including logging capability"""
     diagnostics_results = {
@@ -208,6 +208,13 @@ async def diagnostics(token: str = Depends(validate_auth)):
         logging.error(f"Diagnostics error: {error}", exc_info=True)
     
     return diagnostics_results
+
+
+@app.get("/diagnostics_diagnostics_get")
+async def diagnostics_diagnostics_get(token: str = Depends(validate_auth)):
+    """Alternative diagnostics endpoint for compatibility with different naming conventions"""
+    # Just call the main diagnostics function
+    return await diagnostics(token)
 
 
 @app.get("/tools")

@@ -2,6 +2,21 @@
 
 This guide provides implementation patterns and standards for building a Python-based MCP (Model Context Protocol) server with Snowflake integration and Open WebUI authentication.
 
+## Cortex Search Maintenance
+
+**IMPORTANT: After modifying any of these tables, ALWAYS refresh the Cortex Search services:**
+- AI_SCHEMA_METADATA → refresh SCHEMA_SEARCH
+- AI_BUSINESS_CONTEXT → refresh BUSINESS_CONTEXT_SEARCH
+- AI_VIEW_CONSTRAINTS → (no search service yet - consider creating VIEW_CONSTRAINTS_SEARCH)
+
+Run these commands to trigger immediate refresh after table changes:
+```sql
+ALTER CORTEX SEARCH SERVICE SCHEMA_SEARCH REFRESH;
+ALTER CORTEX SEARCH SERVICE BUSINESS_CONTEXT_SEARCH REFRESH;
+```
+
+This ensures the search services have the latest metadata for accurate context retrieval.
+
 ## Core Principles
 
 **IMPORTANT: You MUST follow these principles in all code changes and PRP generations:**
