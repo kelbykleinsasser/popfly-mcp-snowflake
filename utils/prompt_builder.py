@@ -25,7 +25,8 @@ class PromptBuilder:
     """
 
     VIEW_TO_DOMAIN_MAP: Dict[str, str] = {
-        "V_CREATOR_PAYMENTS_UNION": "creator_payments",
+        "MV_CREATOR_PAYMENTS_UNION": "creator_payments",  # Materialized table
+        "V_CREATOR_PAYMENTS_UNION": "creator_payments",   # Keep for backward compatibility
     }
 
     DEFAULT_TEMPLATE = (

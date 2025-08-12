@@ -10,7 +10,7 @@ from typing import Dict, Any, List
 from mcp.types import TextContent
 from pydantic import BaseModel, validator
 
-from cortex.cortex_generator import CortexGenerator, CortexRequest
+from cortex.cortex_generator_v2 import CortexGenerator, CortexRequest
 from tools.snowflake_tools import read_query_handler
 from utils.logging import log_activity
 
@@ -55,10 +55,10 @@ async def query_payments_handler(arguments: Dict[str, Any], bearer_token: str = 
     try:
         params = QueryPaymentsSchema(**arguments)
         
-        # Create Cortex request
+        # Create Cortex request (using materialized table, not view)
         cortex_request = CortexRequest(
             natural_language_query=params.query,
-            view_name="V_CREATOR_PAYMENTS_UNION",
+            view_name="MV_CREATOR_PAYMENTS_UNION",  # Note: This is actually a table, not a view
             max_rows=params.max_rows
         )
         
@@ -89,26 +89,11 @@ async def query_payments_handler(arguments: Dict[str, Any], bearer_token: str = 
         # Execute the query (pass bearer_token for consistent logging, mark as internal)
         sql_results = await read_query_handler(sql_arguments, bearer_token, request_id, is_internal=True)
         
-        # Calculate execution time and log the activity
+        # Calculate execution time - but don't log yet, we need to count rows first
         execution_time_ms = int((time.time() - start_time) * 1000)
-        await log_activity(
-            "query_payments", 
-            {
-                **arguments,
-                "prompt_id": cortex_response.prompt_id,
-                "prompt_char_count": cortex_response.prompt_char_count,
-                "relevant_columns_k": cortex_response.relevant_columns_k,
-            }, 
-            execution_success=cortex_response.success,
-            natural_query=params.query,
-            generated_sql=cortex_response.generated_sql,
-            execution_time_ms=execution_time_ms,
-            processing_stage="post",
-            bearer_token=bearer_token,
-            request_id=request_id
-        )
         
         # Extract the actual data from the SQL results
+        row_count = 0
         if sql_results and sql_results[0].text:
             # Parse the JSON results from the SQL response
             sql_text = sql_results[0].text
@@ -122,16 +107,55 @@ async def query_payments_handler(arguments: Dict[str, Any], bearer_token: str = 
                 if json_match:
                     try:
                         results_data = json.loads(json_match.group(1))
+                        row_count = len(results_data)  # Count actual results
                         
                         # Use the payment formatter for clean results
                         from utils.response_formatters import format_payment_results
                         clean_result = format_payment_results(results_data, params.query)
+                        
+                        # Log the successful activity with actual row count
+                        await log_activity(
+                            "query_payments", 
+                            {
+                                **arguments,
+                                "prompt_id": cortex_response.prompt_id,
+                                "prompt_char_count": cortex_response.prompt_char_count,
+                                "relevant_columns_k": cortex_response.relevant_columns_k,
+                            }, 
+                            row_count=row_count,
+                            execution_success=True,
+                            natural_query=params.query,
+                            generated_sql=cortex_response.generated_sql,
+                            execution_time_ms=execution_time_ms,
+                            processing_stage="post",
+                            bearer_token=bearer_token,
+                            request_id=request_id
+                        )
                         
                         return [TextContent(type="text", text=clean_result)]
                     except json.JSONDecodeError:
                         pass
         
         # Fallback to simple no results message
+        # Log activity with 0 rows if we reach here
+        await log_activity(
+            "query_payments", 
+            {
+                **arguments,
+                "prompt_id": cortex_response.prompt_id if 'cortex_response' in locals() else None,
+                "prompt_char_count": cortex_response.prompt_char_count if 'cortex_response' in locals() else None,
+                "relevant_columns_k": cortex_response.relevant_columns_k if 'cortex_response' in locals() else None,
+            }, 
+            row_count=0,
+            execution_success=True,
+            natural_query=params.query,
+            generated_sql=cortex_response.generated_sql if 'cortex_response' in locals() else None,
+            execution_time_ms=execution_time_ms,
+            processing_stage="post",
+            bearer_token=bearer_token,
+            request_id=request_id
+        )
+        
         return [TextContent(type="text", text=f"**No Payment Records Found**\n\nNo payment records match your query: \"{params.query}\"")]
         
     except Exception as error:

@@ -9,23 +9,28 @@ This guide describes how to configure Open WebUI to connect to the Popfly MCP Sn
 
 Different user groups access different tool sets through specific URL paths:
 
-| User Group | URL | Available Tools |
-|------------|-----|-----------------|
-| Default Users | `https://mcp.popfly.com/tools` | No tools currently (expandable via database) |
-| Admins | `https://mcp.popfly.com/admins/tools` | query_payments |
-| Account Managers | `https://mcp.popfly.com/accountmanagers/tools` | query_payments |
+| User Group | Open WebUI URL Configuration | Actual Endpoint Called | Available Tools |
+|------------|------------------------------|------------------------|-----------------|
+| Default Users | `https://mcp.popfly.com` | `/tools` | No tools currently (expandable via database) |
+| Admins | `https://mcp.popfly.com/admins` | `/admins/tools` | query_payments |
+| Account Managers | `https://mcp.popfly.com/accountmanagers` | `/accountmanagers/tools` | query_payments |
+
+**Important**: In Open WebUI, use the base group URL WITHOUT `/tools` - Open WebUI automatically appends `/tools` and `/openapi.json` to your base URL.
 
 ### 1. In Open WebUI Admin Panel
 Navigate to **Admin Panel** → **Settings** → **Connections** → **+ Add Connection**
 
 ### 2. Enter Configuration
 - **Name**: Can be anything descriptive (e.g., "Payment Team", "Data Analysts")
-- **URL**: Use the appropriate group URL from the table above
+- **URL**: Use the base group URL from the table above (e.g., `https://mcp.popfly.com/admins`)
 - **Auth**: Bearer
 - **Bearer Token**: Your API key
 - **Visibility**: Public/Private as needed
 
-**Important**: The display name in Open WebUI is just for organization - only the URL path determines which tools are available.
+**Critical**: 
+- Use `https://mcp.popfly.com/admins` NOT `https://mcp.popfly.com/admins/tools`
+- Open WebUI will automatically append `/tools` to whatever URL you provide
+- The display name in Open WebUI is just for organization - only the URL path determines which tools are available
 
 ### 3. Save and Test
 Click **Save** - connection should succeed immediately. Invalid group paths will return an error.

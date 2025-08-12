@@ -34,7 +34,8 @@ class SqlValidator:
     READ_ONLY_KEYWORDS = ['SELECT', 'SHOW', 'DESCRIBE', 'EXPLAIN', 'WITH']
     
     ALLOWED_TABLES = {
-        'V_CREATOR_PAYMENTS_UNION',
+        'MV_CREATOR_PAYMENTS_UNION',  # Materialized table
+        'V_CREATOR_PAYMENTS_UNION',   # Keep for backward compatibility
         'AI_USER_ACTIVITY_LOG',
         'AI_BUSINESS_CONTEXT', 
         'AI_SCHEMA_METADATA',

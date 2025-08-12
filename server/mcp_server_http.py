@@ -377,7 +377,8 @@ async def root():
     }
 
 @app.get("/openapi.json")
-@app.get("/{group_path}/tools/openapi.json")
+@app.get("/{group_path}/openapi.json")  # Open WebUI expects this pattern
+@app.get("/{group_path}/tools/openapi.json")  # Keep for backward compatibility
 async def get_openapi(group_path: str = None):
     """Return OpenAPI specification for Open WebUI integration"""
     # Validate group path if provided

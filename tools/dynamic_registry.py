@@ -96,8 +96,10 @@ class DynamicToolRegistry:
                 # Map tools to groups
                 if is_shared:
                     # Add to all groups
+                    self.logger.info(f"Tool {tool_name} is shared, adding to all groups: {list(self.tools_by_group.keys())}")
                     for group_path in self.tools_by_group:
                         self.tools_by_group[group_path].append(tool_name)
+                        self.logger.info(f"Added {tool_name} to group {group_path}")
                 else:
                     # Load specific group mappings
                     cursor.execute("""
