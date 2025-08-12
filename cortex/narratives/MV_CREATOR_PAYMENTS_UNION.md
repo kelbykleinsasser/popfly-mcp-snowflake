@@ -53,7 +53,7 @@
   - Examples: recent timestamps
 - PAYMENT_TYPE
   - Meaning: Business model classification for creator payments and invoices
-  - Synonyms: agency payments, agency invoices, agency transfers, labs invoice, labs payments, project payments, creator payments, direct payments, direct invoices, business mode, model
+  - Synonyms: agency payments, agency invoices, agency transfers, labs invoice, labs payments, project payments, creator payments, direct, payments, direct invoices, business model, model
   - Examples: Agency Mode, Direct Mode, Unassigned
 - REFERENCE_TYPE
   - Meaning: Upstream object type

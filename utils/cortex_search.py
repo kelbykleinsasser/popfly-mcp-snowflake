@@ -45,22 +45,24 @@ class CortexSearchClient:
             with get_pooled_connection() as conn:
                 cursor = conn.cursor()
                 
-                # Use Snowflake's SEARCH function for Cortex Search
-                # Correct syntax for Cortex Search in Snowflake
+                # Try native Cortex Search 
+                # Note: This will fail if search services aren't available
+                # and fallback to keyword matching
                 search_sql = """
-                SELECT *
-                FROM TABLE(
-                    SEARCH_PREVIEW(
-                        'SCHEMA_SEARCH',
-                        %s,
-                        {'columns': ['TABLE_NAME', 'COLUMN_NAME', 'BUSINESS_MEANING', 'KEYWORDS', 'EXAMPLES'], 
-                         'limit': %s,
-                         'filter': {'@eq': {'TABLE_NAME': %s}}}
-                    )
-                )
+                SELECT 
+                    1.0 as relevance_score,
+                    TABLE_NAME,
+                    COLUMN_NAME,
+                    BUSINESS_MEANING,
+                    KEYWORDS,
+                    EXAMPLES
+                FROM AI_SCHEMA_METADATA
+                WHERE SEARCH('SCHEMA_SEARCH', %s)
+                AND TABLE_NAME = %s
+                LIMIT %s
                 """
                 
-                cursor.execute(search_sql, (cls.SCHEMA_SEARCH, query, limit, view_name))
+                cursor.execute(search_sql, (query, view_name, limit))
                 
                 results = []
                 for row in cursor.fetchall():
@@ -215,20 +217,27 @@ class CortexSearchClient:
         context_parts = []
         
         # Get relevant schema columns
-        schema_results = cls.search_schema_context(query, view_name, limit=5)
+        schema_results = cls.search_schema_context(query, view_name, limit=8)  # Increased limit
         if schema_results:
             columns = []
-            for result in schema_results[:5]:  # Top 5 most relevant
+            for result in schema_results[:8]:  # Top 8 most relevant
                 data = result.data
                 col_desc = f"{data['column_name']}: {data['business_meaning']}"
                 if data.get('examples'):
                     # Truncate examples if too long
-                    examples = data['examples'][:50] + "..." if len(data['examples']) > 50 else data['examples']
+                    examples = data['examples'][:60] + "..." if len(data['examples']) > 60 else data['examples']
                     col_desc += f" (e.g., {examples})"
                 columns.append(col_desc)
             
             if columns:
                 context_parts.append("Relevant columns:\n" + "\n".join(f"- {c}" for c in columns))
+        else:
+            # If no search results, provide essential columns
+            context_parts.append("""Key columns:
+- PAYMENT_TYPE: Business model (Agency Mode, Direct Mode)
+- PAYMENT_AMOUNT: Payment amount
+- PAYMENT_DATE: Date of payment
+- PAYMENT_STATUS: Status of payment""")
         
         # Get business context
         business_results = cls.search_business_context(query)
@@ -291,15 +300,19 @@ class CortexSearchClient:
                     cursor.execute(sql, (view_name, limit))
                 else:
                     # Build conditions with proper parameterization
+                    # Include important business-related keywords
+                    important_keywords = ['payment', 'type', 'business', 'model', 'labs', 'direct', 'agency']
+                    all_keywords = keywords + [k for k in important_keywords if k not in keywords]
+                    
                     conditions = []
                     params = [view_name]
                     
-                    for keyword in keywords:
+                    for keyword in all_keywords[:10]:  # Limit to avoid too complex query
                         keyword_pattern = f'%{keyword}%'
                         conditions.append("""
                             (LOWER(COLUMN_NAME) LIKE %s OR
                              LOWER(BUSINESS_MEANING) LIKE %s OR
-                             LOWER(KEYWORDS) LIKE %s)
+                             LOWER(COALESCE(KEYWORDS::VARCHAR, '')) LIKE %s)
                         """)
                         params.extend([keyword_pattern, keyword_pattern, keyword_pattern])
                     
