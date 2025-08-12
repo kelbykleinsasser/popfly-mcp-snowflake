@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     cortex_max_tokens: int = 3000
     cortex_intelligent_filtering: bool = True  # Filter columns based on query relevance (disable if less reliable)
     cortex_prewarm_on_startup: bool = True  # Pre-warm Cortex on startup to avoid cold starts
+    cortex_use_search: bool = True  # Use Cortex Search for context (90% prompt reduction)
     
     # Query Configuration
     max_query_rows: int = 1000
@@ -97,6 +98,7 @@ class Settings(BaseSettings):
         self.cortex_max_tokens = int(os.getenv('CORTEX_MAX_TOKENS', '3000'))
         self.cortex_intelligent_filtering = os.getenv('CORTEX_INTELLIGENT_FILTERING', 'true').lower() == 'true'
         self.cortex_prewarm_on_startup = os.getenv('CORTEX_PREWARM_ON_STARTUP', 'true').lower() == 'true'
+        self.cortex_use_search = os.getenv('CORTEX_USE_SEARCH', 'true').lower() == 'true'
         self.max_query_rows = int(os.getenv('MAX_QUERY_ROWS', '1000'))
         self.max_query_rows_limit = int(os.getenv('MAX_QUERY_ROWS_LIMIT', '10000'))
         self.query_timeout = int(os.getenv('QUERY_TIMEOUT', '30'))

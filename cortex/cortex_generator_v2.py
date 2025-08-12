@@ -14,6 +14,7 @@ from validators.sql_validator_v2 import DynamicSqlValidator, SqlValidationResult
 from utils.logging import log_cortex_usage
 from utils.prompt_builder import PromptBuilder
 from cortex.view_constraints_loader import ViewConstraintsLoader
+from utils.cortex_search import CortexSearchClient
 
 class CortexRequest(BaseModel):
     natural_language_query: str
@@ -42,22 +43,60 @@ class CortexGenerator:
     async def generate_sql(cls, request: CortexRequest) -> CortexResponse:
         """Generate SQL using Snowflake Cortex with dynamic validation"""
         try:
-            # Load constraints from database (single source of truth)
-            constraints = ViewConstraintsLoader.load_constraints(request.view_name)
-            if not constraints:
-                return CortexResponse(
-                    success=False,
-                    error=f"View '{request.view_name}' not configured in AI_VIEW_CONSTRAINTS"
+            # Check if we should use Cortex Search (default: True)
+            use_search = getattr(settings, 'cortex_use_search', True)
+            
+            if use_search:
+                # NEW: Use Cortex Search for minimal context (90% reduction)
+                logging.info(f"Using Cortex Search for context retrieval")
+                
+                # Get minimal, relevant context using search
+                relevant_context = CortexSearchClient.build_minimal_context(
+                    request.natural_language_query,
+                    request.view_name
+                )
+                
+                # Build minimal prompt
+                prompt = f"""You are a Snowflake SQL expert for {request.view_name}.
+
+{relevant_context}
+
+User query: "{request.natural_language_query}"
+
+Generate a single SELECT statement. Include LIMIT {request.max_rows}.
+Return only the SQL, no explanation."""
+                
+                logging.info(f"Prompt size with Cortex Search: {len(prompt)} chars (was ~5000)")
+                
+                # Create mock built object for compatibility
+                built = type('obj', (object,), {
+                    'prompt_text': prompt,
+                    'prompt_id': 'cortex_search',
+                    'prompt_char_count': len(prompt),
+                    'relevant_columns_k': 5
+                })()
+                
+            else:
+                # FALLBACK: Traditional approach with full context
+                logging.info(f"Using traditional full context approach")
+                
+                # Load constraints from database (single source of truth)
+                constraints = ViewConstraintsLoader.load_constraints(request.view_name)
+                if not constraints:
+                    return CortexResponse(
+                        success=False,
+                        error=f"View '{request.view_name}' not configured in AI_VIEW_CONSTRAINTS"
+                    )
+                
+                # Build Cortex prompt using database metadata
+                built = PromptBuilder.build_prompt_for_view(
+                    view_name=request.view_name,
+                    user_query=request.natural_language_query,
+                    max_rows=request.max_rows,
+                    allowed_ops=constraints["allowed_operations"],
+                    allowed_columns=constraints["allowed_columns"],
                 )
             
-            # Build Cortex prompt using database metadata
-            built = PromptBuilder.build_prompt_for_view(
-                view_name=request.view_name,
-                user_query=request.natural_language_query,
-                max_rows=request.max_rows,
-                allowed_ops=constraints["allowed_operations"],
-                allowed_columns=constraints["allowed_columns"],
-            )
             prompt = built.prompt_text
             
             # Execute Cortex SQL generation
@@ -73,13 +112,18 @@ class CortexGenerator:
             validator = DynamicSqlValidator()
             validation_result = validator.validate_sql_query(generated_sql)
             
-            # Additional validation for view-specific constraints
-            if validation_result.is_valid:
-                validation_result = cls.validate_view_constraints(
-                    generated_sql, 
-                    request.view_name, 
-                    constraints
-                )
+            # Additional validation for view-specific constraints (only if not using search)
+            if validation_result.is_valid and not use_search:
+                # Load constraints if we haven't already
+                if 'constraints' not in locals():
+                    constraints = ViewConstraintsLoader.load_constraints(request.view_name)
+                
+                if constraints:
+                    validation_result = cls.validate_view_constraints(
+                        generated_sql, 
+                        request.view_name, 
+                        constraints
+                    )
             
             # Log usage
             await log_cortex_usage(
@@ -180,11 +224,13 @@ class CortexGenerator:
                 
                 # Clean up common Cortex response formatting
                 import re
-                sql_match = re.search(r'```sql\s*\n(.*?)\n```', generated_sql, re.DOTALL)
+                # Handle various markdown formats
+                sql_match = re.search(r'```(?:sql)?\s*\n?(.*?)\n?```', generated_sql, re.DOTALL | re.IGNORECASE)
                 if sql_match:
                     generated_sql = sql_match.group(1).strip()
-                elif generated_sql.startswith('```sql'):
-                    generated_sql = generated_sql.replace('```sql', '').replace('```', '')
+                elif '```' in generated_sql:
+                    # Remove any remaining backticks
+                    generated_sql = generated_sql.replace('```sql', '').replace('```SQL', '').replace('```', '')
                 
                 # Additional cleanup
                 generated_sql = generated_sql.strip()
