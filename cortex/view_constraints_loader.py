@@ -5,6 +5,7 @@ This ensures AI_VIEW_CONSTRAINTS is the single source of truth.
 import logging
 from typing import Dict, List, Optional, Any
 from utils.config import get_environment_snowflake_connection
+from utils.connection_pool import get_pooled_connection
 
 class ViewConstraintsLoader:
     """Load view constraints from AI_VIEW_CONSTRAINTS table"""
@@ -13,23 +14,22 @@ class ViewConstraintsLoader:
     def load_constraints(view_name: str) -> Optional[Dict[str, Any]]:
         """Load constraints for a specific view/table from database"""
         try:
-            conn = get_environment_snowflake_connection()
-            cursor = conn.cursor()
-            
-            # Get constraints from database
-            cursor.execute("""
-                SELECT 
-                    ALLOWED_OPERATIONS,
-                    ALLOWED_COLUMNS,
-                    FORBIDDEN_KEYWORDS,
-                    BUSINESS_CONTEXT
-                FROM PF.BI.AI_VIEW_CONSTRAINTS
-                WHERE VIEW_NAME = %s
-            """, (view_name,))
-            
-            result = cursor.fetchone()
-            cursor.close()
-            conn.close()
+            with get_pooled_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get constraints from database
+                cursor.execute("""
+                    SELECT 
+                        ALLOWED_OPERATIONS,
+                        ALLOWED_COLUMNS,
+                        FORBIDDEN_KEYWORDS,
+                        BUSINESS_CONTEXT
+                    FROM PF.BI.AI_VIEW_CONSTRAINTS
+                    WHERE VIEW_NAME = %s
+                """, (view_name,))
+                
+                result = cursor.fetchone()
+                cursor.close()
             
             if result:
                 import json
@@ -62,20 +62,19 @@ class ViewConstraintsLoader:
     def get_allowed_tables() -> List[str]:
         """Get list of all allowed tables from database"""
         try:
-            conn = get_environment_snowflake_connection()
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                SELECT DISTINCT VIEW_NAME 
-                FROM PF.BI.AI_VIEW_CONSTRAINTS
-                UNION
-                SELECT DISTINCT TABLE_NAME
-                FROM PF.BI.AI_SCHEMA_METADATA
-            """)
-            
-            results = cursor.fetchall()
-            cursor.close()
-            conn.close()
+            with get_pooled_connection() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    SELECT DISTINCT VIEW_NAME 
+                    FROM PF.BI.AI_VIEW_CONSTRAINTS
+                    UNION
+                    SELECT DISTINCT TABLE_NAME
+                    FROM PF.BI.AI_SCHEMA_METADATA
+                """)
+                
+                results = cursor.fetchall()
+                cursor.close()
             
             allowed_tables = [row[0] for row in results if row[0]]
             

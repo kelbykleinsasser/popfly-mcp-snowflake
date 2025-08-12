@@ -86,6 +86,9 @@ async def query_payments_handler(arguments: Dict[str, Any], bearer_token: str = 
             "max_rows": params.max_rows
         }
         
+        # Log the generated SQL for debugging
+        logging.info(f"[{request_id[:8]}] Executing Cortex-generated SQL: {cortex_response.generated_sql}")
+        
         # Execute the query (pass bearer_token for consistent logging, mark as internal)
         sql_results = await read_query_handler(sql_arguments, bearer_token, request_id, is_internal=True)
         
@@ -109,9 +112,8 @@ async def query_payments_handler(arguments: Dict[str, Any], bearer_token: str = 
                         results_data = json.loads(json_match.group(1))
                         row_count = len(results_data)  # Count actual results
                         
-                        # Use the payment formatter for clean results
-                        from utils.response_formatters import format_payment_results
-                        clean_result = format_payment_results(results_data, params.query)
+                        # Return raw JSON to prevent LLM embellishment
+                        clean_result = json.dumps(results_data, indent=2)
                         
                         # Log the successful activity with actual row count
                         await log_activity(

@@ -66,6 +66,9 @@ class CortexGenerator:
             generated_sql = await cls.call_cortex_complete(prompt)
             generation_time_ms = int((time.time() - start_gen) * 1000)
             
+            # Log the generated SQL for debugging
+            logging.info(f"Cortex generated SQL for query '{request.natural_language_query[:50]}...': {generated_sql}")
+            
             # Validate using dynamic validator (loads allowed tables from DB)
             validator = DynamicSqlValidator()
             validation_result = validator.validate_sql_query(generated_sql)
@@ -114,10 +117,13 @@ class CortexGenerator:
         """Additional validation specific to view constraints"""
         sql_upper = sql.upper()
         
-        # Check forbidden keywords
+        # Check forbidden keywords (must be whole words, not part of column names)
         forbidden = constraints.get("forbidden_keywords", [])
+        import re
         for keyword in forbidden:
-            if keyword.upper() in sql_upper:
+            # Use word boundaries to avoid matching column names like CREATED_DATE
+            pattern = r'\b' + keyword.upper() + r'\b'
+            if re.search(pattern, sql_upper):
                 return SqlValidationResult(
                     is_valid=False,
                     error=f"Forbidden operation '{keyword}' detected in SQL"
@@ -151,22 +157,23 @@ class CortexGenerator:
     async def call_cortex_complete(cls, prompt: str) -> str:
         """Call Snowflake Cortex COMPLETE function"""
         try:
-            conn = get_environment_snowflake_connection()
-            cursor = conn.cursor()
+            from utils.connection_pool import get_pooled_connection
             
-            # Execute Cortex COMPLETE function
-            cortex_sql = """
-            SELECT SNOWFLAKE.CORTEX.COMPLETE(
-                %s,
-                %s
-            ) as generated_sql
-            """
-            
-            cursor.execute(cortex_sql, (settings.cortex_model, prompt))
-            result = cursor.fetchone()
-            
-            cursor.close()
-            conn.close()
+            with get_pooled_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Execute Cortex COMPLETE function
+                cortex_sql = """
+                SELECT SNOWFLAKE.CORTEX.COMPLETE(
+                    %s,
+                    %s
+                ) as generated_sql
+                """
+                
+                cursor.execute(cortex_sql, (settings.cortex_model, prompt))
+                result = cursor.fetchone()
+                
+                cursor.close()
             
             if result and result[0]:
                 generated_sql = str(result[0]).strip()

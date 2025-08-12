@@ -5,18 +5,11 @@ import os
 import tempfile
 from typing import Optional
 
-def get_snowflake_connection(
-    account: str,
-    user: str,
+def get_private_key_bytes(
     private_key_path: str,
-    private_key_passphrase: Optional[str] = None,
-    database: Optional[str] = None,
-    schema: Optional[str] = None,
-    warehouse: Optional[str] = None,
-    role: Optional[str] = None
-) -> snowflake.connector.SnowflakeConnection:
-    """Get authenticated Snowflake connection using RSA private key"""
-    
+    private_key_passphrase: Optional[str] = None
+) -> bytes:
+    """Load private key from file and return as DER bytes"""
     # Resolve absolute path to handle relative paths correctly
     if not os.path.isabs(private_key_path):
         # If relative path, resolve relative to project root
@@ -31,11 +24,25 @@ def get_snowflake_connection(
             password=private_key_passphrase.encode() if private_key_passphrase else None
         )
     
-    pkb = private_key.private_bytes(
+    return private_key.private_bytes(
         encoding=serialization.Encoding.DER,
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption()
     )
+
+def get_snowflake_connection(
+    account: str,
+    user: str,
+    private_key_path: str,
+    private_key_passphrase: Optional[str] = None,
+    database: Optional[str] = None,
+    schema: Optional[str] = None,
+    warehouse: Optional[str] = None,
+    role: Optional[str] = None
+) -> snowflake.connector.SnowflakeConnection:
+    """Get authenticated Snowflake connection using RSA private key"""
+    
+    pkb = get_private_key_bytes(private_key_path, private_key_passphrase)
     
     return snowflake.connector.connect(
         account=account,

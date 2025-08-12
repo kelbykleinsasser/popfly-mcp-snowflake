@@ -6,6 +6,7 @@ from typing import Dict, Any, Optional, Literal
 from datetime import datetime
 
 from utils.config import get_environment_snowflake_connection
+from utils.connection_pool import get_pooled_connection
 from config.settings import settings
 
 async def log_activity(
@@ -39,27 +40,26 @@ async def log_activity(
         action_type: Override default action_type (e.g., "internal_tool_call")
     """
     try:
-        conn = get_environment_snowflake_connection()
+        with get_pooled_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Hash bearer token for privacy
+            bearer_token_hash = None
+            if bearer_token:
+                bearer_token_hash = hashlib.sha256(bearer_token.encode()).hexdigest()[:16]
         
-        cursor = conn.cursor()
-        
-        # Hash bearer token for privacy
-        bearer_token_hash = None
-        if bearer_token:
-            bearer_token_hash = hashlib.sha256(bearer_token.encode()).hexdigest()[:16]
-        
-        # Build ACTION_DETAILS object with context that's not in dedicated columns
-        action_details_obj = {
+            # Build ACTION_DETAILS object with context that's not in dedicated columns
+            action_details_obj = {
             "tool_name": tool_name,
             "arguments": arguments if processing_stage == "post" else None,
             "row_count": row_count if processing_stage == "post" else None,
             "natural_query": natural_query,
             "generated_sql": generated_sql,
             "bearer_token_hash": bearer_token_hash
-        }
-        
-        # Use INSERT...SELECT pattern for OBJECT columns
-        insert_sql = """
+            }
+            
+            # Use INSERT...SELECT pattern for OBJECT columns
+            insert_sql = """
         INSERT INTO AI_USER_ACTIVITY_LOG (
             USER_EMAIL,
             ACTION_TYPE,
@@ -83,36 +83,35 @@ async def log_activity(
             %s as PROCESSING_STAGE,
             PARSE_JSON(%s) as RAW_REQUEST,
             %s as REQUEST_ID
-        """
+            """
+            
+            # Convert dict to JSON string for Snowflake OBJECT column
+            action_details_json = json.dumps(action_details_obj)
+            
+            # Convert raw_request to JSON string for VARIANT column (or None)
+            raw_request_json = raw_request if raw_request else None
+            
+            # Use provided action_type or default to "tool_execution"
+            if action_type is None:
+                action_type = "tool_execution"
         
-        # Convert dict to JSON string for Snowflake OBJECT column
-        action_details_json = json.dumps(action_details_obj)
-        
-        # Convert raw_request to JSON string for VARIANT column (or None)
-        raw_request_json = raw_request if raw_request else None
-        
-        # Use provided action_type or default to "tool_execution"
-        if action_type is None:
-            action_type = "tool_execution"
-        
-        cursor.execute(insert_sql, (
-            'mcp_server@popfly.com',  # Generic email for MCP server
-            action_type,
-            'mcp_tool',
-            tool_name,
-            action_details_json,  # JSON string that will be converted by PARSE_JSON()
-            execution_success,
-            execution_time_ms,
-            processing_stage,
-            raw_request_json,  # Raw request JSON string or None
-            request_id
-        ))
-        
-        # Ensure the insert is committed
-        conn.commit()
-        
-        cursor.close()
-        conn.close()
+            cursor.execute(insert_sql, (
+                'mcp_server@popfly.com',  # Generic email for MCP server
+                action_type,
+                'mcp_tool',
+                tool_name,
+                action_details_json,  # JSON string that will be converted by PARSE_JSON()
+                execution_success,
+                execution_time_ms,
+                processing_stage,
+                raw_request_json,  # Raw request JSON string or None
+                request_id
+            ))
+            
+            # Ensure the insert is committed
+            conn.commit()
+            
+            cursor.close()
         
         logging.debug(f"Successfully logged activity for tool: {tool_name}")
         
@@ -135,11 +134,10 @@ async def log_cortex_usage(
 ):
     """Log Cortex usage to AI_CORTEX_USAGE_LOG"""
     try:
-        conn = get_environment_snowflake_connection()
-        
-        cursor = conn.cursor()
-        
-        insert_sql = """
+        with get_pooled_connection() as conn:
+            cursor = conn.cursor()
+            
+            insert_sql = """
         INSERT INTO AI_CORTEX_USAGE_LOG (
             USER_EMAIL,
             FUNCTION_NAME,
@@ -152,9 +150,9 @@ async def log_cortex_usage(
         ) VALUES (
             %s, %s, %s, %s, %s, %s, %s, %s
         )
-        """
-        
-        cursor.execute(insert_sql, (
+            """
+            
+            cursor.execute(insert_sql, (
             'mcp_server@popfly.com',
             'COMPLETE',  # Using COMPLETE function
             natural_query,
@@ -163,10 +161,10 @@ async def log_cortex_usage(
             validation_passed,
             credits_used,  # Using as token approximation
             execution_time_ms
-        ))
-        
-        cursor.close()
-        conn.close()
+            ))
+            
+            conn.commit()
+            cursor.close()
         
     except Exception as error:
         logging.warning(f"Failed to log Cortex usage: {error}")

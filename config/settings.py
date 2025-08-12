@@ -26,14 +26,20 @@ class Settings(BaseSettings):
     open_webui_api_key: str = ''
     
     # Cortex Configuration
-    cortex_model: str = 'llama3.1-70b'
+    cortex_model: str = 'llama3.1-70b'  # Back to 70b - it's actually faster than 8b
     cortex_timeout: int = 30
     cortex_max_tokens: int = 3000
+    cortex_intelligent_filtering: bool = True  # Filter columns based on query relevance (disable if less reliable)
+    cortex_prewarm_on_startup: bool = True  # Pre-warm Cortex on startup to avoid cold starts
     
     # Query Configuration
     max_query_rows: int = 1000
     max_query_rows_limit: int = 10000
     query_timeout: int = 30
+    
+    # Connection Pool Configuration
+    connection_pool_min_size: int = 2
+    connection_pool_max_size: int = 10
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -86,12 +92,18 @@ class Settings(BaseSettings):
         self.open_webui_api_key = os.getenv('OPEN_WEBUI_API_KEY', '')
         
         # Cortex and Query settings
-        self.cortex_model = os.getenv('CORTEX_MODEL', 'llama3.1-70b')
+        self.cortex_model = os.getenv('CORTEX_MODEL', 'llama3.1-70b')  # Back to 70b
         self.cortex_timeout = int(os.getenv('CORTEX_TIMEOUT', '30'))
         self.cortex_max_tokens = int(os.getenv('CORTEX_MAX_TOKENS', '3000'))
+        self.cortex_intelligent_filtering = os.getenv('CORTEX_INTELLIGENT_FILTERING', 'true').lower() == 'true'
+        self.cortex_prewarm_on_startup = os.getenv('CORTEX_PREWARM_ON_STARTUP', 'true').lower() == 'true'
         self.max_query_rows = int(os.getenv('MAX_QUERY_ROWS', '1000'))
         self.max_query_rows_limit = int(os.getenv('MAX_QUERY_ROWS_LIMIT', '10000'))
         self.query_timeout = int(os.getenv('QUERY_TIMEOUT', '30'))
+        
+        # Connection Pool settings
+        self.connection_pool_min_size = int(os.getenv('CONNECTION_POOL_MIN_SIZE', '2'))
+        self.connection_pool_max_size = int(os.getenv('CONNECTION_POOL_MAX_SIZE', '10'))
     
     def validate_required_settings(self) -> bool:
         """Validate that all required settings are present"""

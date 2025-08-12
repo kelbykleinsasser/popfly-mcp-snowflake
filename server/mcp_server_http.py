@@ -81,6 +81,13 @@ async def lifespan(app: FastAPI):
         logger.error(f"❌ Failed to initialize dynamic tool registry: {error}")
         # Continue with fallback to static tools
     
+    # Pre-warm connections and Cortex if enabled
+    try:
+        from utils.prewarm import prewarm_connections
+        await prewarm_connections()
+    except Exception as error:
+        logger.warning(f"Pre-warming failed (non-critical): {error}")
+    
     logger.info("🚀 HTTP MCP Server initialized successfully")
     yield
     logger.info("🛑 HTTP MCP Server shutting down")

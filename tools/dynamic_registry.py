@@ -8,6 +8,7 @@ import logging
 from typing import Dict, Any, List, Optional, Callable
 from mcp.types import Tool, TextContent
 from utils.config import get_environment_snowflake_connection
+from utils.connection_pool import get_pooled_connection
 from pydantic import BaseModel
 
 
@@ -39,83 +40,82 @@ class DynamicToolRegistry:
         self.logger.info("Loading dynamic tools from database...")
         
         try:
-            conn = get_environment_snowflake_connection()
-            cursor = conn.cursor()
-            
-            # Load user groups
-            cursor.execute("""
-                SELECT GROUP_ID, GROUP_NAME, GROUP_PATH, DESCRIPTION, IS_DEFAULT
-                FROM PF.BI.AI_MCP_USER_GROUPS
-                WHERE IS_ACTIVE = TRUE
-            """)
-            
-            for row in cursor.fetchall():
-                group_id, group_name, group_path, description, is_default = row
-                self.groups[group_path or 'default'] = {
-                    'id': group_id,
-                    'name': group_name,
-                    'description': description,
-                    'is_default': is_default
-                }
-                self.tools_by_group[group_path or 'default'] = []
-            
-            # Load active tools
-            cursor.execute("""
-                SELECT TOOL_ID, TOOL_NAME, TOOL_DESCRIPTION, INPUT_SCHEMA,
-                       HANDLER_MODULE, HANDLER_FUNCTION, IS_SHARED, USES_CORTEX
-                FROM PF.BI.AI_MCP_TOOLS
-                WHERE IS_ACTIVE = TRUE
-            """)
-            
-            for row in cursor.fetchall():
-                tool_id, tool_name, tool_description, input_schema, handler_module, handler_function, is_shared, uses_cortex = row
+            with get_pooled_connection() as conn:
+                cursor = conn.cursor()
                 
-                # Create tool object
-                tool = DynamicTool(
-                    tool_id=tool_id,
-                    tool_name=tool_name,
-                    tool_description=tool_description,
-                    input_schema=input_schema if isinstance(input_schema, dict) else json.loads(input_schema),
-                    handler_module=handler_module,
-                    handler_function=handler_function,
-                    is_shared=is_shared,
-                    is_active=True,
-                    uses_cortex=uses_cortex
-                )
+                # Load user groups
+                cursor.execute("""
+                    SELECT GROUP_ID, GROUP_NAME, GROUP_PATH, DESCRIPTION, IS_DEFAULT
+                    FROM PF.BI.AI_MCP_USER_GROUPS
+                    WHERE IS_ACTIVE = TRUE
+                """)
                 
-                self.tools[tool_name] = tool
+                for row in cursor.fetchall():
+                    group_id, group_name, group_path, description, is_default = row
+                    self.groups[group_path or 'default'] = {
+                        'id': group_id,
+                        'name': group_name,
+                        'description': description,
+                        'is_default': is_default
+                    }
+                    self.tools_by_group[group_path or 'default'] = []
                 
-                # Load handler
-                try:
-                    self._load_handler(tool)
-                    self.logger.info(f"Loaded tool: {tool_name} from {handler_module}.{handler_function}")
-                except Exception as e:
-                    self.logger.error(f"Failed to load handler for {tool_name}: {e}")
-                    continue
+                # Load active tools
+                cursor.execute("""
+                    SELECT TOOL_ID, TOOL_NAME, TOOL_DESCRIPTION, INPUT_SCHEMA,
+                           HANDLER_MODULE, HANDLER_FUNCTION, IS_SHARED, USES_CORTEX
+                    FROM PF.BI.AI_MCP_TOOLS
+                    WHERE IS_ACTIVE = TRUE
+                """)
                 
-                # Map tools to groups
-                if is_shared:
-                    # Add to all groups
-                    self.logger.info(f"Tool {tool_name} is shared, adding to all groups: {list(self.tools_by_group.keys())}")
-                    for group_path in self.tools_by_group:
-                        self.tools_by_group[group_path].append(tool_name)
-                        self.logger.info(f"Added {tool_name} to group {group_path}")
-                else:
-                    # Load specific group mappings
-                    cursor.execute("""
-                        SELECT g.GROUP_PATH
-                        FROM PF.BI.AI_MCP_TOOL_GROUP_ACCESS tga
-                        JOIN PF.BI.AI_MCP_USER_GROUPS g ON tga.GROUP_ID = g.GROUP_ID
-                        WHERE tga.TOOL_ID = %s AND g.IS_ACTIVE = TRUE
-                    """, (tool_id,))
+                for row in cursor.fetchall():
+                    tool_id, tool_name, tool_description, input_schema, handler_module, handler_function, is_shared, uses_cortex = row
                     
-                    for (group_path,) in cursor.fetchall():
-                        path = group_path or 'default'
-                        if path in self.tools_by_group:
-                            self.tools_by_group[path].append(tool_name)
-            
-            cursor.close()
-            conn.close()
+                    # Create tool object
+                    tool = DynamicTool(
+                        tool_id=tool_id,
+                        tool_name=tool_name,
+                        tool_description=tool_description,
+                        input_schema=input_schema if isinstance(input_schema, dict) else json.loads(input_schema),
+                        handler_module=handler_module,
+                        handler_function=handler_function,
+                        is_shared=is_shared,
+                        is_active=True,
+                        uses_cortex=uses_cortex
+                    )
+                    
+                    self.tools[tool_name] = tool
+                    
+                    # Load handler
+                    try:
+                        self._load_handler(tool)
+                        self.logger.info(f"Loaded tool: {tool_name} from {handler_module}.{handler_function}")
+                    except Exception as e:
+                        self.logger.error(f"Failed to load handler for {tool_name}: {e}")
+                        continue
+                    
+                    # Map tools to groups
+                    if is_shared:
+                        # Add to all groups
+                        self.logger.info(f"Tool {tool_name} is shared, adding to all groups: {list(self.tools_by_group.keys())}")
+                        for group_path in self.tools_by_group:
+                            self.tools_by_group[group_path].append(tool_name)
+                            self.logger.info(f"Added {tool_name} to group {group_path}")
+                    else:
+                        # Load specific group mappings
+                        cursor.execute("""
+                            SELECT g.GROUP_PATH
+                            FROM PF.BI.AI_MCP_TOOL_GROUP_ACCESS tga
+                            JOIN PF.BI.AI_MCP_USER_GROUPS g ON tga.GROUP_ID = g.GROUP_ID
+                            WHERE tga.TOOL_ID = %s AND g.IS_ACTIVE = TRUE
+                        """, (tool_id,))
+                        
+                        for (group_path,) in cursor.fetchall():
+                            path = group_path or 'default'
+                            if path in self.tools_by_group:
+                                self.tools_by_group[path].append(tool_name)
+                
+                cursor.close()
             
             self.logger.info(f"Loaded {len(self.tools)} tools and {len(self.groups)} groups")
             

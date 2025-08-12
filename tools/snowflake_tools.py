@@ -6,6 +6,7 @@ from mcp.types import Tool, TextContent
 from pydantic import BaseModel, validator
 
 from utils.config import get_environment_snowflake_connection
+from utils.connection_pool import get_pooled_connection
 from config.settings import settings
 from validators.sql_validator import SqlValidator
 from utils.response_helpers import create_success_response, create_error_response
@@ -46,28 +47,28 @@ async def read_query_handler(arguments: Dict[str, Any], bearer_token: str = None
         if not validation.is_valid:
             return [TextContent(type="text", text=f"Invalid SQL query: {validation.error}")]
         
-        conn = get_environment_snowflake_connection()
-        cursor = conn.cursor()
-        
-        # Add LIMIT clause if not present
-        limited_query = params.query
-        if "LIMIT" not in limited_query.upper():
-            limited_query += f" LIMIT {params.max_rows}"
-        
-        cursor.execute(limited_query)
-        results = cursor.fetchall()
-        column_names = [desc[0] for desc in cursor.description]
-        
-        # Convert to list of dictionaries
-        result_list = []
-        for row in results:
-            result_dict = {}
-            for i, value in enumerate(row):
-                result_dict[column_names[i]] = value
-            result_list.append(result_dict)
-        
-        cursor.close()
-        conn.close()
+        # Use connection pool
+        with get_pooled_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Add LIMIT clause if not present
+            limited_query = params.query
+            if "LIMIT" not in limited_query.upper():
+                limited_query += f" LIMIT {params.max_rows}"
+            
+            cursor.execute(limited_query)
+            results = cursor.fetchall()
+            column_names = [desc[0] for desc in cursor.description]
+            
+            # Convert to list of dictionaries
+            result_list = []
+            for row in results:
+                result_dict = {}
+                for i, value in enumerate(row):
+                    result_dict[column_names[i]] = value
+                result_list.append(result_dict)
+            
+            cursor.close()
         
         execution_time_ms = int((time.time() - start_time) * 1000)
         await log_activity(

@@ -30,6 +30,7 @@
 - PAYMENT_DATE is the actual date that payment occured either through a Transfer or Invoice Payment. PAYMENT_DATE is always null when an invoice has not yet been paid. When a user asks to see Creator Payments, they are referring to actual payments where PAYMENT_DATE is not null. When a user asks to see Creator Invoices, they are asking for Invoices where PAYMENT_STATUS contains "paid", "open", "unpaid".
 - Companies (AKA company, client, customer, brand) can be identified by COMPANY_NAME, and STRIPE_CUSTOMER_NAME. Less commonly, users may want to look up Invoices and Transfers by CAMPAIGN_NAME (sometimes CAMPAIGN_NAME contains the name of the company), or even less commonly by STRIPE_CUSTOMER_ID.
 - PAYMENT_AMOUNT is always the Invoice amount when PAYMENT_STATUS<>'paid'. In these cases these should not be referred to as payments as they are only invoices. When PAYMENT_STATUS='paid' the amount is either the Invoice amount (PAYMENT_TYPE="Direct Mode") or Transfer amount (PAYMENT_TYPE="Agency Mode")
+- CREATOR_NAME can be null sometimes. When it is, use STRIPE_CONNECTED_ACCOUNT_NAME in its place. Essentially a coalesce statement that prioritizes CREATOR_NAME first
 
 
 ## Key columns

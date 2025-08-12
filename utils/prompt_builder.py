@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 from utils.config import get_environment_snowflake_connection
+from utils.connection_pool import get_pooled_connection
+from utils.column_filter import ColumnFilter
 
 
 @dataclass
@@ -61,7 +63,20 @@ class PromptBuilder:
         business_rules = cls._load_business_rules(domain) if domain else None
 
         # Load schema metadata for relevant column snippets
-        relevant_columns = cls._load_schema_metadata(view_name)
+        all_columns_metadata = cls._load_schema_metadata(view_name)
+        
+        # Filter columns based on query relevance if enabled
+        filtered_columns = ColumnFilter.filter_columns(user_query, allowed_columns)
+        
+        # Log the filtering effect
+        logging.info(f"Column filtering: {len(filtered_columns)}/{len(allowed_columns)} columns selected for query: {user_query[:50]}...")
+        
+        # Only use metadata for filtered columns
+        relevant_columns = [
+            col_meta for col_meta in all_columns_metadata 
+            if col_meta.get('COLUMN_NAME') in filtered_columns
+        ]
+        
         relevant_snippets, k = cls._render_relevant_column_snippets(relevant_columns)
 
         if template is None:
@@ -70,7 +85,7 @@ class PromptBuilder:
         # Prepare replacements
         replacement_map: Dict[str, str] = {
             "[[VIEW_NAME]]": view_name,
-            "[[ALLOWED_COLUMNS]]": ", ".join(allowed_columns),
+            "[[ALLOWED_COLUMNS]]": ", ".join(filtered_columns),  # Use filtered columns
             "[[ALLOWED_OPS]]": ", ".join(allowed_ops),
             "[[MAX_ROWS]]": str(max_rows),
             "[[BUSINESS_RULES]]": business_rules or "- Creator payment tracking and analysis\n- Common filters: status, date, amount, campaign, company",
@@ -118,19 +133,18 @@ class PromptBuilder:
     def _load_active_prompt_template() -> Tuple[Optional[str], Optional[str]]:
         """Fetch the most recent active prompt. Returns (prompt_id, template)."""
         try:
-            conn = get_environment_snowflake_connection()
-            cursor = conn.cursor()
-            sql = (
+            with get_pooled_connection() as conn:
+                cursor = conn.cursor()
+                sql = (
                 "SELECT PROMPT_ID, PROMPT_TEMPLATE "
                 "FROM PF.BI.AI_CORTEX_PROMPTS "
                 "WHERE IS_ACTIVE = TRUE "
                 "ORDER BY UPDATED_AT DESC NULLS LAST, CREATED_AT DESC NULLS LAST "
                 "LIMIT 1"
-            )
-            cursor.execute(sql)
-            row = cursor.fetchone()
-            cursor.close()
-            conn.close()
+                )
+                cursor.execute(sql)
+                row = cursor.fetchone()
+                cursor.close()
             if row:
                 return row[0], row[1]
         except Exception as error:
@@ -142,19 +156,18 @@ class PromptBuilder:
         if not domain:
             return None
         try:
-            conn = get_environment_snowflake_connection()
-            cursor = conn.cursor()
-            sql = (
+            with get_pooled_connection() as conn:
+                cursor = conn.cursor()
+                sql = (
                 "SELECT TITLE, DESCRIPTION, EXAMPLES "
                 "FROM PF.BI.AI_BUSINESS_CONTEXT "
                 "WHERE DOMAIN = %s "
                 "ORDER BY UPDATED_AT DESC NULLS LAST, CREATED_AT DESC NULLS LAST "
                 "LIMIT 1"
-            )
-            cursor.execute(sql, (domain,))
-            row = cursor.fetchone()
-            cursor.close()
-            conn.close()
+                )
+                cursor.execute(sql, (domain,))
+                row = cursor.fetchone()
+                cursor.close()
             if row:
                 title = (row[0] or "").strip()
                 description = (row[1] or "").strip()
@@ -174,29 +187,28 @@ class PromptBuilder:
     @staticmethod
     def _load_schema_metadata(view_name: str) -> List[Dict[str, Optional[str]]]:
         try:
-            conn = get_environment_snowflake_connection()
-            cursor = conn.cursor()
-            sql = (
+            with get_pooled_connection() as conn:
+                cursor = conn.cursor()
+                sql = (
                 "SELECT COLUMN_NAME, BUSINESS_MEANING, EXAMPLES "
                 "FROM PF.BI.AI_SCHEMA_METADATA "
                 "WHERE TABLE_NAME = %s "
                 "ORDER BY CREATED_AT DESC NULLS LAST"
-            )
-            cursor.execute(sql, (view_name,))
-            rows = cursor.fetchall() or []
-            # Normalize to dicts
-            result: List[Dict[str, Optional[str]]] = []
-            for r in rows:
-                result.append(
-                    {
-                        "COLUMN_NAME": r[0],
-                        "BUSINESS_MEANING": r[1],
-                        "EXAMPLES": r[2],
-                    }
                 )
-            cursor.close()
-            conn.close()
-            return result
+                cursor.execute(sql, (view_name,))
+                rows = cursor.fetchall() or []
+                # Normalize to dicts
+                result: List[Dict[str, Optional[str]]] = []
+                for r in rows:
+                    result.append(
+                        {
+                            "COLUMN_NAME": r[0],
+                            "BUSINESS_MEANING": r[1],
+                            "EXAMPLES": r[2],
+                        }
+                    )
+                cursor.close()
+                return result
         except Exception as error:
             logging.debug(f"Schema metadata lookup failed (falling back): {error}")
             return []
