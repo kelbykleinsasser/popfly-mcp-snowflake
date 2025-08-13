@@ -112,8 +112,41 @@ async def query_payments_handler(arguments: Dict[str, Any], bearer_token: str = 
                         results_data = json.loads(json_match.group(1))
                         row_count = len(results_data)  # Count actual results
                         
-                        # Return raw JSON to prevent LLM embellishment
+                        # Add temporal context to the response
+                        # Check if the query or SQL references current time periods
+                        import datetime
+                        current_date = datetime.datetime.now()
+                        
+                        # Detect if query is about current time period
+                        time_context = ""
+                        query_lower = params.query.lower()
+                        sql_lower = cortex_response.generated_sql.lower() if cortex_response.generated_sql else ""
+                        
+                        if "current_date" in sql_lower or "current_timestamp" in sql_lower:
+                            # Add explicit temporal context
+                            if "this month" in query_lower or "current month" in query_lower:
+                                time_context = f"\n\n**Time Period: {current_date.strftime('%B %Y')}**"
+                            elif "today" in query_lower:
+                                time_context = f"\n\n**Date: {current_date.strftime('%B %d, %Y')}**"
+                            elif "this year" in query_lower or "current year" in query_lower:
+                                time_context = f"\n\n**Year: {current_date.year}**"
+                            elif "this week" in query_lower:
+                                time_context = f"\n\n**Week of: {current_date.strftime('%B %d, %Y')}**"
+                        
+                        # Return JSON with temporal context and query info
                         clean_result = json.dumps(results_data, indent=2)
+                        
+                        # Add metadata footer with temporal context
+                        metadata_parts = []
+                        if time_context:
+                            metadata_parts.append(time_context)
+                        
+                        # Add SQL query for transparency
+                        if cortex_response.generated_sql:
+                            metadata_parts.append(f"\n**Generated SQL:** `{cortex_response.generated_sql}`")
+                        
+                        if metadata_parts:
+                            clean_result = clean_result + "\n" + "".join(metadata_parts)
                         
                         # Log the successful activity with actual row count
                         await log_activity(
