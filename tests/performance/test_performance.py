@@ -22,7 +22,7 @@ async def test_query_performance():
     # Import after setting up logging
     from tools.payment_tools import query_payments_handler
     from cortex.cortex_generator_v2 import CortexGenerator, CortexRequest
-    from validators.sql_validator_v2 import DynamicSqlValidator
+    from validators.sql_validator import SqlValidator
     from tools.snowflake_tools import read_query_handler
     from utils.config import get_environment_snowflake_connection
     

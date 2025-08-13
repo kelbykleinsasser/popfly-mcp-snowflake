@@ -6,14 +6,44 @@
 
 ## Business rules
 - Allowed operations: SELECT, WHERE, GROUP BY, ORDER BY, LIMIT
-- Heavily favor querying only PF.BI.MV_CREATOR_PAYMENTS_UNION for most inquires, and join to other explicitly referenced tables or views only as a last resort
-- Forbidden: Updates, deletes, DDL
+- **CRITICAL: NO JOINS ALLOWED. Query ONLY from PF.BI.MV_CREATOR_PAYMENTS_UNION table. All data must come from this single table.**
+- Never join to other tables or views. All required data is already in MV_CREATOR_PAYMENTS_UNION
+- Forbidden: Updates, deletes, DDL, JOINs of any kind (INNER, LEFT, RIGHT, FULL, CROSS), UNION, WITH clauses
 - Timezone: UTC; Date types: TIMESTAMP_NTZ
 - Default time window if none provided: January 2025 and later
 - Preferred date column for recency: PAYMENT_DATE over CREATED_DATE
 - Canonical PAYMENT_STATUS values: paid, pending, open, failed
 - Canonical PAYMENT_TYPE values: Agency Mode, Direct Mode, Unassigned
-- PAYMENT_TYPE value synonyms: Direct Mode (Self-Serve, Self Serve, Self Service, Platform, Customer), Agency Mode (Popfly Labs, Agency Services)
+
+## SQL Generation Rules for PAYMENT_TYPE
+**CRITICAL: When generating SQL WHERE clauses for PAYMENT_TYPE:**
+- If user mentions "labs", "Popfly Labs", "agency services", or "agency" → Generate: `WHERE PAYMENT_TYPE = 'Agency Mode'`
+- If user mentions "self-serve", "self serve", "platform", or "direct" → Generate: `WHERE PAYMENT_TYPE = 'Direct Mode'`
+- NEVER use the literal values "Labs", "labs", "Popfly Labs", "self-serve", etc. in SQL
+- The PAYMENT_TYPE column ONLY contains: 'Agency Mode', 'Direct Mode', 'Unassigned'
+- Example: User says "show labs payments" → SQL must be: `SELECT * FROM MV_CREATOR_PAYMENTS_UNION WHERE PAYMENT_TYPE = 'Agency Mode'`
+
+**ABSOLUTELY CRITICAL - NEVER TREAT AS COMPANY NAMES:**
+The following terms (case-insensitive) MUST ALWAYS be interpreted as PAYMENT_TYPE values, NEVER as COMPANY_NAME or STRIPE_CUSTOMER_NAME:
+- "labs", "Labs", "LABS" → ALWAYS means `PAYMENT_TYPE = 'Agency Mode'`
+- "popfly labs", "Popfly Labs", "POPFLY LABS" → ALWAYS means `PAYMENT_TYPE = 'Agency Mode'`
+- "agency", "Agency", "AGENCY" → ALWAYS means `PAYMENT_TYPE = 'Agency Mode'`
+- "agency services", "Agency Services" → ALWAYS means `PAYMENT_TYPE = 'Agency Mode'`
+- "agency mode", "Agency Mode" → ALWAYS means `PAYMENT_TYPE = 'Agency Mode'`
+- "self-serve", "self serve", "selfserve" → ALWAYS means `PAYMENT_TYPE = 'Direct Mode'`
+- "platform", "Platform" → ALWAYS means `PAYMENT_TYPE = 'Direct Mode'`
+- "direct", "Direct" → ALWAYS means `PAYMENT_TYPE = 'Direct Mode'`
+- "direct mode", "Direct Mode" → ALWAYS means `PAYMENT_TYPE = 'Direct Mode'`
+
+**NEVER generate SQL like:**
+- ❌ `WHERE COMPANY_NAME = 'Popfly Labs'` 
+- ❌ `WHERE COMPANY_NAME = 'Agency Services'`
+- ❌ `WHERE STRIPE_CUSTOMER_NAME = 'Labs'`
+- ❌ `WHERE COMPANY_NAME = 'Platform'`
+
+**ALWAYS generate SQL like:**
+- ✅ `WHERE PAYMENT_TYPE = 'Agency Mode'` (for labs/agency terms)
+- ✅ `WHERE PAYMENT_TYPE = 'Direct Mode'` (for self-serve/platform terms)
 - Safe sorts: PAYMENT_DATE DESC, PAYMENT_AMOUNT DESC, CREATOR_NAME ASC
 - Note: View contains both invoices (creator bills) and transfers (payments to creators)
 - PAYMENT_TYPE carries considerable weight in this context. The PAYMENT_TYPE column contains the designations Agency Mode, Direct Mode, and Unassigned. Agency Mode represents Popfly  agency services (Popfly Labs, labs, agency) where we source and pay creators, and later invoice customers once campaigns (projects) have been completed; Direct Mode represents direct customer-creator relationships where Popfly is merely providing the platform upon which transactions take place. Creators "apply" to Campaigns and once accepted can create and submit content, interact with the Customer users on the platform, submit invoices, and get paid.
@@ -32,6 +62,38 @@
 - PAYMENT_AMOUNT is always the Invoice amount when PAYMENT_STATUS<>'paid'. In these cases these should not be referred to as payments as they are only invoices. When PAYMENT_STATUS='paid' the amount is either the Invoice amount (PAYMENT_TYPE="Direct Mode") or Transfer amount (PAYMENT_TYPE="Agency Mode")
 - CREATOR_NAME can be null sometimes. When it is, use STRIPE_CONNECTED_ACCOUNT_NAME in its place. Essentially a coalesce statement that prioritizes CREATOR_NAME first
 
+
+## CRITICAL SQL GENERATION RULES FOR COUNTING AND AGGREGATION
+**IMPORTANT: ONLY THESE COLUMNS EXIST IN MV_CREATOR_PAYMENTS_UNION:**
+1. PAYMENT_TYPE
+2. REFERENCE_ID (use this as the unique identifier)
+3. REFERENCE_TYPE
+4. STRIPE_CONNECTED_ACCOUNT_ID
+5. STRIPE_CUSTOMER_ID
+6. USER_ID
+7. CREATOR_NAME
+8. STRIPE_CONNECTED_ACCOUNT_NAME
+9. STRIPE_CUSTOMER_NAME
+10. COMPANY_NAME
+11. CAMPAIGN_NAME
+12. PAYMENT_STATUS
+13. PAYMENT_AMOUNT
+14. PAYMENT_DATE
+15. CREATED_DATE
+
+**THESE COLUMNS DO NOT EXIST - NEVER USE THEM:**
+- ❌ PAYMENT_ID (does not exist - use REFERENCE_ID instead)
+- ❌ ID (does not exist)
+- ❌ INVOICE_ID (does not exist - use REFERENCE_ID)
+- ❌ TRANSFER_ID (does not exist - use REFERENCE_ID)
+- ❌ PAYMENT_DATETIME (does not exist - use PAYMENT_DATE)
+
+**FOR COUNTING AND AGGREGATION:**
+- To count payments: Use `COUNT(*)` or `COUNT(REFERENCE_ID)`
+- To count distinct payments: Use `COUNT(DISTINCT REFERENCE_ID)`
+- To sum amounts: Use `SUM(PAYMENT_AMOUNT)`
+- To count by type: Use `COUNT(*)` with `GROUP BY PAYMENT_TYPE`
+- NEVER use `COUNT(PAYMENT_ID)` - this column does not exist
 
 ## Key columns
 - PAYMENT_STATUS
@@ -52,9 +114,10 @@
   - Synonyms: date, created, issued, transfer date, invoice date, billing date, paid date, payment date
   - Examples: recent timestamps
 - PAYMENT_TYPE
-  - Meaning: Business model classification for creator payments and invoices
-  - Synonyms: agency payments, agency invoices, agency transfers, labs invoice, labs payments, project payments, creator payments, direct, payments, direct invoices, business model, model
+  - Meaning: Business model classification. ONLY contains 'Agency Mode', 'Direct Mode', or 'Unassigned'. When users say "labs" they mean 'Agency Mode'. When users say "self-serve" or "platform" they mean 'Direct Mode'.
+  - Synonyms: labs (means Agency Mode), Popfly Labs (means Agency Mode), agency (means Agency Mode), self-serve (means Direct Mode), platform (means Direct Mode), business model
   - Examples: Agency Mode, Direct Mode, Unassigned
+  - Relationships: "labs" always translates to PAYMENT_TYPE='Agency Mode', never COMPANY_NAME='Labs'
 - REFERENCE_TYPE
   - Meaning: Upstream object type
   - Synonyms: source type
@@ -98,7 +161,7 @@
   - Examples: 8789, 8157, 8859
   - Relationships: PF.BI.PF_CONTENTCREATORS.USERID, PF.BI.PF_ASPNETUSERS.ID
 
-## Typical questions
+## Typical questions and correct SQL patterns
 - Show payments by amount range and date
 - Top creators by payment volume
 - Invoices by status and company
@@ -112,9 +175,13 @@
 - Payment status by creator and campaign
 - Total payments by campaign
 - Unpaid invoices by campaign
-- Payment approvals by creator
-- Payment approvals by campaign
-- Payment approvals by company
+- "Show labs payments" → `SELECT * FROM MV_CREATOR_PAYMENTS_UNION WHERE PAYMENT_TYPE = 'Agency Mode'`
+- "List Popfly Labs invoices" → `SELECT * FROM MV_CREATOR_PAYMENTS_UNION WHERE PAYMENT_TYPE = 'Agency Mode' AND REFERENCE_TYPE LIKE '%Invoice%'`
+- "agency services total" → `SELECT SUM(PAYMENT_AMOUNT) FROM MV_CREATOR_PAYMENTS_UNION WHERE PAYMENT_TYPE = 'Agency Mode'`
+- "agency payments" → `SELECT * FROM MV_CREATOR_PAYMENTS_UNION WHERE PAYMENT_TYPE = 'Agency Mode'`
+- "self-serve payments" → `SELECT * FROM MV_CREATOR_PAYMENTS_UNION WHERE PAYMENT_TYPE = 'Direct Mode'`
+- "platform invoice amounts" → `SELECT PAYMENT_AMOUNT FROM MV_CREATOR_PAYMENTS_UNION WHERE PAYMENT_TYPE = 'Direct Mode'`
+- "direct business invoices" → `SELECT * FROM MV_CREATOR_PAYMENTS_UNION WHERE PAYMENT_TYPE = 'Direct Mode' AND REFERENCE_TYPE LIKE '%Invoice%'`
 
 ## Sensitive data
 - Do not surface internal IDs beyond REFERENCE_ID and Stripe IDs already exposed in this view.

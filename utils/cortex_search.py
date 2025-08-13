@@ -6,6 +6,9 @@ import logging
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from utils.connection_pool import get_pooled_connection
+import json
+import requests
+from config.settings import settings
 
 @dataclass
 class SearchResult:
@@ -45,45 +48,49 @@ class CortexSearchClient:
             with get_pooled_connection() as conn:
                 cursor = conn.cursor()
                 
-                # Try native Cortex Search 
-                # Note: This will fail if search services aren't available
-                # and fallback to keyword matching
+                # Use SEARCH_PREVIEW function with proper JSON format
+                query_params = json.dumps({
+                    "query": query,
+                    "columns": ["TABLE_NAME", "COLUMN_NAME", "BUSINESS_MEANING", "KEYWORDS", "EXAMPLES"],
+                    "filter": {"@eq": {"TABLE_NAME": view_name}},
+                    "limit": limit
+                })
+                
                 search_sql = """
-                SELECT 
-                    1.0 as relevance_score,
-                    TABLE_NAME,
-                    COLUMN_NAME,
-                    BUSINESS_MEANING,
-                    KEYWORDS,
-                    EXAMPLES
-                FROM AI_SCHEMA_METADATA
-                WHERE SEARCH('SCHEMA_SEARCH', %s)
-                AND TABLE_NAME = %s
-                LIMIT %s
+                SELECT SNOWFLAKE.CORTEX.SEARCH_PREVIEW(
+                    'PF.BI.SCHEMA_SEARCH',
+                    %s
+                )
                 """
                 
-                cursor.execute(search_sql, (query, view_name, limit))
+                cursor.execute(search_sql, (query_params,))
+                result = cursor.fetchone()
+                cursor.close()
                 
                 results = []
-                for row in cursor.fetchall():
-                    results.append(SearchResult(
-                        source="schema",
-                        relevance_score=float(row[0]),
-                        data={
-                            "table_name": row[1],
-                            "column_name": row[2],
-                            "business_meaning": row[3],
-                            "keywords": row[4],
-                            "examples": row[5]
-                        }
-                    ))
+                if result and result[0]:
+                    # Parse the JSON response
+                    search_data = json.loads(result[0])
+                    
+                    if "results" in search_data:
+                        for item in search_data["results"]:
+                            results.append(SearchResult(
+                                source="schema",
+                                relevance_score=item.get("score", 1.0),
+                                data={
+                                    "table_name": item.get("TABLE_NAME"),
+                                    "column_name": item.get("COLUMN_NAME"),
+                                    "business_meaning": item.get("BUSINESS_MEANING"),
+                                    "keywords": item.get("KEYWORDS"),
+                                    "examples": item.get("EXAMPLES")
+                                }
+                            ))
                 
-                cursor.close()
                 return results
                 
         except Exception as e:
-            logging.warning(f"Schema search failed, using fallback: {e}")
-            return cls._fallback_schema_search(query, view_name, limit)
+            logging.error(f"Schema search failed - Cortex Search service required: {e}")
+            raise RuntimeError(f"Cortex Search service SCHEMA_SEARCH is required but not available: {e}")
     
     @classmethod
     def search_business_context(cls, query: str, domain: str = "creator_payments", limit: int = 3) -> List[SearchResult]:
@@ -102,47 +109,49 @@ class CortexSearchClient:
             with get_pooled_connection() as conn:
                 cursor = conn.cursor()
                 
+                # Use SEARCH_PREVIEW function with proper JSON format
+                query_params = json.dumps({
+                    "query": query,
+                    "columns": ["DOMAIN", "TITLE", "DESCRIPTION", "KEYWORDS", "EXAMPLES"],
+                    "filter": {"@eq": {"DOMAIN": domain}},
+                    "limit": limit
+                })
+                
                 search_sql = """
-                SELECT 
-                    SEARCH_SCORE() as relevance_score,
-                    DOMAIN,
-                    TITLE,
-                    DESCRIPTION,
-                    KEYWORDS,
-                    EXAMPLES
-                FROM TABLE(
-                    SEARCHABLE_PREVIEW(
-                        SERVICE_NAME => %s,
-                        QUERY => %s,
-                        LIMIT => %s
-                    )
+                SELECT SNOWFLAKE.CORTEX.SEARCH_PREVIEW(
+                    'PF.BI.BUSINESS_CONTEXT_SEARCH',
+                    %s
                 )
-                WHERE DOMAIN = %s
-                ORDER BY relevance_score DESC
                 """
                 
-                cursor.execute(search_sql, (cls.BUSINESS_SEARCH, query, limit, domain))
+                cursor.execute(search_sql, (query_params,))
+                result = cursor.fetchone()
+                cursor.close()
                 
                 results = []
-                for row in cursor.fetchall():
-                    results.append(SearchResult(
-                        source="business",
-                        relevance_score=float(row[0]),
-                        data={
-                            "domain": row[1],
-                            "title": row[2],
-                            "description": row[3],
-                            "keywords": row[4],
-                            "examples": row[5]
-                        }
-                    ))
+                if result and result[0]:
+                    # Parse the JSON response
+                    search_data = json.loads(result[0])
+                    
+                    if "results" in search_data:
+                        for item in search_data["results"]:
+                            results.append(SearchResult(
+                                source="business",
+                                relevance_score=item.get("score", 1.0),
+                                data={
+                                    "domain": item.get("DOMAIN"),
+                                    "title": item.get("TITLE"),
+                                    "description": item.get("DESCRIPTION"),
+                                    "keywords": item.get("KEYWORDS"),
+                                    "examples": item.get("EXAMPLES")
+                                }
+                            ))
                 
-                cursor.close()
                 return results
                 
         except Exception as e:
-            logging.warning(f"Business context search failed: {e}")
-            return []
+            logging.error(f"Business context search failed - Cortex Search service required: {e}")
+            raise RuntimeError(f"Cortex Search service BUSINESS_CONTEXT_SEARCH is required but not available: {e}")
     
     @classmethod
     def get_view_constraints(cls, view_name: str) -> Optional[SearchResult]:
@@ -195,7 +204,8 @@ class CortexSearchClient:
                 return None
                 
         except Exception as e:
-            logging.warning(f"Constraint lookup failed: {e}")
+            logging.error(f"Constraint lookup failed: {e}")
+            # Constraints are optional, so we don't raise here
             return None
     
     @classmethod
@@ -231,36 +241,6 @@ class CortexSearchClient:
             
             if columns:
                 context_parts.append("Relevant columns:\n" + "\n".join(f"- {c}" for c in columns))
-        else:
-            # If no search results, get some key columns from database
-            try:
-                with get_pooled_connection() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute("""
-                        SELECT COLUMN_NAME, BUSINESS_MEANING, EXAMPLES
-                        FROM PF.BI.AI_SCHEMA_METADATA
-                        WHERE TABLE_NAME = %s
-                        AND COLUMN_NAME IN (
-                            SELECT COLUMN_NAME 
-                            FROM PF.BI.AI_SCHEMA_METADATA 
-                            WHERE TABLE_NAME = %s
-                            ORDER BY CREATED_AT 
-                            LIMIT 5
-                        )
-                    """, (view_name, view_name))
-                    
-                    default_cols = []
-                    for row in cursor.fetchall():
-                        col_desc = f"{row[0]}: {row[1]}"
-                        if row[2]:
-                            col_desc += f" ({row[2][:30]}...)" if len(row[2]) > 30 else f" ({row[2]})"
-                        default_cols.append(f"- {col_desc}")
-                    
-                    if default_cols:
-                        context_parts.append("Key columns:\n" + "\n".join(default_cols))
-                    cursor.close()
-            except Exception as e:
-                logging.warning(f"Failed to get default columns: {e}")
         
         # Get business context
         business_results = cls.search_business_context(query)
@@ -294,85 +274,3 @@ class CortexSearchClient:
         
         return full_context
     
-    @classmethod
-    def _fallback_schema_search(cls, query: str, view_name: str, limit: int) -> List[SearchResult]:
-        """
-        Fallback keyword matching when Cortex Search unavailable
-        """
-        try:
-            with get_pooled_connection() as conn:
-                cursor = conn.cursor()
-                
-                # Extract keywords and clean them
-                keywords = [k.strip().lower() for k in query.lower().split() if len(k.strip()) > 2]
-                
-                if not keywords:
-                    # If no keywords, return key columns
-                    sql = """
-                    SELECT 
-                        TABLE_NAME,
-                        COLUMN_NAME,
-                        BUSINESS_MEANING,
-                        KEYWORDS,
-                        EXAMPLES
-                    FROM PF.BI.AI_SCHEMA_METADATA
-                    WHERE TABLE_NAME = %s
-                    AND COLUMN_NAME IN ('PAYMENT_TYPE', 'PAYMENT_AMOUNT', 'PAYMENT_DATE', 'PAYMENT_STATUS')
-                    LIMIT %s
-                    """
-                    cursor.execute(sql, (view_name, limit))
-                else:
-                    # Build conditions with proper parameterization
-                    # Include important business-related keywords
-                    important_keywords = ['payment', 'type', 'business', 'model', 'labs', 'direct', 'agency']
-                    all_keywords = keywords + [k for k in important_keywords if k not in keywords]
-                    
-                    conditions = []
-                    params = [view_name]
-                    
-                    for keyword in all_keywords[:10]:  # Limit to avoid too complex query
-                        keyword_pattern = f'%{keyword}%'
-                        conditions.append("""
-                            (LOWER(COLUMN_NAME) LIKE %s OR
-                             LOWER(BUSINESS_MEANING) LIKE %s OR
-                             LOWER(COALESCE(KEYWORDS::VARCHAR, '')) LIKE %s)
-                        """)
-                        params.extend([keyword_pattern, keyword_pattern, keyword_pattern])
-                    
-                    where_clause = " OR ".join(conditions)
-                    
-                    sql = f"""
-                    SELECT 
-                        TABLE_NAME,
-                        COLUMN_NAME,
-                        BUSINESS_MEANING,
-                        KEYWORDS,
-                        EXAMPLES
-                    FROM PF.BI.AI_SCHEMA_METADATA
-                    WHERE TABLE_NAME = %s
-                    AND ({where_clause})
-                    LIMIT %s
-                    """
-                    params.append(limit)
-                    cursor.execute(sql, params)
-                
-                results = []
-                for row in cursor.fetchall():
-                    results.append(SearchResult(
-                        source="schema",
-                        relevance_score=0.5,  # Default score for fallback
-                        data={
-                            "table_name": row[0],
-                            "column_name": row[1],
-                            "business_meaning": row[2],
-                            "keywords": row[3],
-                            "examples": row[4]
-                        }
-                    ))
-                
-                cursor.close()
-                return results
-                
-        except Exception as e:
-            logging.error(f"Fallback schema search failed: {e}")
-            return []

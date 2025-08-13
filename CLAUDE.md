@@ -2,17 +2,39 @@
 
 This guide provides implementation patterns and standards for building a Python-based MCP (Model Context Protocol) server with Snowflake integration and Open WebUI authentication.
 
+## CRITICAL: Metadata Management Rules
+
+**⚠️ NEVER UPDATE DATABASE METADATA DIRECTLY! ⚠️**
+
+ALL metadata updates MUST follow this process:
+1. **Edit the narrative file** in `cortex/narratives/`
+2. **Run** `python -m cortex.process_narrative <narrative_file>`
+3. The script will update the database tables automatically
+
+**Why this is CRITICAL:**
+- Direct database updates will be **LOST** when narratives are reprocessed
+- Narratives are the **single source of truth** for all metadata
+- Process_narrative.py ensures consistency across all related tables
+
+**Tables managed by narratives (DO NOT EDIT DIRECTLY):**
+- `PF.BI.AI_VIEW_CONSTRAINTS`
+- `PF.BI.AI_SCHEMA_METADATA`
+- `PF.BI.AI_BUSINESS_CONTEXT`
+
 ## Cortex Search Maintenance
 
-**IMPORTANT: After modifying any of these tables, ALWAYS refresh the Cortex Search services:**
-- AI_SCHEMA_METADATA → refresh SCHEMA_SEARCH
-- AI_BUSINESS_CONTEXT → refresh BUSINESS_CONTEXT_SEARCH
-- AI_VIEW_CONSTRAINTS → (no search service yet - consider creating VIEW_CONSTRAINTS_SEARCH)
+**After processing narratives, refresh the Cortex Search services:**
 
-Run these commands to trigger immediate refresh after table changes:
+Run these commands using snowsql CLI to trigger immediate refresh after narrative processing:
+```bash
+snowsql -q "ALTER CORTEX SEARCH SERVICE PF.BI.BUSINESS_CONTEXT_SEARCH REFRESH;"
+snowsql -q "ALTER CORTEX SEARCH SERVICE PF.BI.SCHEMA_SEARCH REFRESH;"
+```
+
+Or within a SQL session:
 ```sql
-ALTER CORTEX SEARCH SERVICE SCHEMA_SEARCH REFRESH;
-ALTER CORTEX SEARCH SERVICE BUSINESS_CONTEXT_SEARCH REFRESH;
+ALTER CORTEX SEARCH SERVICE PF.BI.BUSINESS_CONTEXT_SEARCH REFRESH;
+ALTER CORTEX SEARCH SERVICE PF.BI.SCHEMA_SEARCH REFRESH;
 ```
 
 This ensures the search services have the latest metadata for accurate context retrieval.

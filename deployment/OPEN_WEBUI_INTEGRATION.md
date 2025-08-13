@@ -119,6 +119,25 @@ gcloud compute ssh mcp-snowflake-vm \
      --command="sudo systemctl restart mcp-http"
    ```
 
+## Cortex Search Services Configuration
+
+**IMPORTANT**: The Cortex Search services exist but require permission grants for MCP_ROLE to access them.
+
+### Required Admin Action
+An admin with ACCOUNTADMIN role or the owner of the Cortex Search services needs to run:
+
+```sql
+-- Grant access to Cortex Search services for MCP_ROLE
+GRANT USAGE ON CORTEX SEARCH SERVICE PF.BI.SCHEMA_SEARCH TO ROLE MCP_ROLE;
+GRANT USAGE ON CORTEX SEARCH SERVICE PF.BI.BUSINESS_CONTEXT_SEARCH TO ROLE MCP_ROLE;
+```
+
+### Current Status
+- ✅ Cortex Search services created (SCHEMA_SEARCH, BUSINESS_CONTEXT_SEARCH)
+- ✅ Code implemented to use SEARCH_PREVIEW function
+- ❌ MCP_ROLE lacks USAGE permission on the services
+- ⚠️ System will fail (no fallback) until permissions are granted
+
 ## Security Notes
 
 - Bearer token is stored securely in GCP Secret Manager

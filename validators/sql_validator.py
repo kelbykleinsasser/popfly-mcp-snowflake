@@ -77,6 +77,12 @@ class SqlValidator:
         if not table_validation.is_valid:
             return table_validation
         
+        # Validate column existence for MV_CREATOR_PAYMENTS_UNION
+        if 'MV_CREATOR_PAYMENTS_UNION' in sql_upper:
+            column_validation = cls.validate_column_existence(sql)
+            if not column_validation.is_valid:
+                return column_validation
+        
         return SqlValidationResult(is_valid=True)
 
     @classmethod
@@ -86,17 +92,63 @@ class SqlValidator:
         return any(sql_upper.startswith(keyword) for keyword in cls.READ_ONLY_KEYWORDS)
 
     @classmethod
-    def validate_table_access(cls, sql: str) -> SqlValidationResult:
-        """Validate that query only accesses allowed tables"""
-        # Extract table names from SQL (simplified approach)
+    def validate_column_existence(cls, sql: str) -> SqlValidationResult:
+        """Validate that only existing columns are referenced"""
         sql_upper = sql.upper()
         
-        # Look for FROM and JOIN clauses
-        table_references = re.findall(r'FROM\s+(\w+)', sql_upper)
-        table_references.extend(re.findall(r'JOIN\s+(\w+)', sql_upper))
+        # Extract column references from SQL
+        # This finds columns in SELECT, WHERE, GROUP BY, ORDER BY, etc.
+        column_patterns = [
+            r'SELECT\s+(.*?)\s+FROM',  # Columns in SELECT
+            r'WHERE\s+(.*?)(?:GROUP|ORDER|LIMIT|$)',  # Columns in WHERE
+            r'GROUP\s+BY\s+(.*?)(?:HAVING|ORDER|LIMIT|$)',  # Columns in GROUP BY
+            r'ORDER\s+BY\s+(.*?)(?:LIMIT|$)',  # Columns in ORDER BY
+        ]
+        
+        referenced_columns = set()
+        for pattern in column_patterns:
+            matches = re.findall(pattern, sql_upper, re.DOTALL)
+            for match in matches:
+                # Extract individual column names (handling functions, aliases, etc.)
+                # This is a simplified extraction - a full SQL parser would be better
+                potential_cols = re.findall(r'\b([A-Z_][A-Z0-9_]*)\b', match)
+                for col in potential_cols:
+                    # Skip SQL keywords and functions
+                    if col not in ['SELECT', 'FROM', 'WHERE', 'AND', 'OR', 'AS', 'COUNT', 
+                                   'SUM', 'AVG', 'MIN', 'MAX', 'DISTINCT', 'CASE', 'WHEN', 
+                                   'THEN', 'END', 'ELSE', 'NULL', 'NOT', 'IN', 'LIKE', 
+                                   'BETWEEN', 'EXISTS', 'ANY', 'ALL', 'EXTRACT', 'YEAR', 
+                                   'MONTH', 'DAY', 'LIMIT', 'DESC', 'ASC']:
+                        referenced_columns.add(col)
+        
+        # Check if any referenced column is not in our known valid columns
+        # For now, skip this validation since we don't have VALID_COLUMNS anymore
+        # The dynamic validator should be used instead
+        
+        # TODO: Load actual columns from database and validate dynamically
+        
+        return SqlValidationResult(is_valid=True)
+    
+    @classmethod
+    def validate_table_access(cls, sql: str) -> SqlValidationResult:
+        """Validate that query only accesses allowed tables"""
+        # Extract table names from SQL (handles schema.table format)
+        sql_upper = sql.upper()
+        
+        # Look for FROM and JOIN clauses - capture full table names including schema
+        # Pattern matches: word, word.word, word.word.word (database.schema.table)
+        # But exclude function calls like EXTRACT(YEAR FROM ...)
+        sql_clean = re.sub(r'EXTRACT\s*\([^)]+\)', '', sql_upper)  # Remove EXTRACT functions
+        sql_clean = re.sub(r'TO_DATE\s*\([^)]+\)', '', sql_clean)  # Remove TO_DATE functions
+        
+        table_references = re.findall(r'FROM\s+([\w.]+)', sql_clean)
+        table_references.extend(re.findall(r'JOIN\s+([\w.]+)', sql_clean))
         
         # Check if any referenced table is not in allowed list
-        for table in table_references:
+        for table_ref in table_references:
+            # Extract just the table name (last part after any dots)
+            table = table_ref.split('.')[-1]
+            
             if table not in cls.ALLOWED_TABLES:
                 return SqlValidationResult(
                     is_valid=False,

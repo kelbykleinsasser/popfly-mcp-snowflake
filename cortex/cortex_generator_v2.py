@@ -10,7 +10,7 @@ import json
 
 from utils.config import get_environment_snowflake_connection
 from config.settings import settings
-from validators.sql_validator_v2 import DynamicSqlValidator, SqlValidationResult
+from validators.sql_validator import SqlValidator, SqlValidationResult
 from utils.logging import log_cortex_usage
 from utils.prompt_builder import PromptBuilder
 from cortex.view_constraints_loader import ViewConstraintsLoader
@@ -57,7 +57,21 @@ class CortexGenerator:
                 )
                 
                 # Build minimal prompt
+                # Load allowed columns from constraints even when using search
+                constraints = ViewConstraintsLoader.load_constraints(request.view_name)
+                allowed_columns = "REFERENCE_ID, PAYMENT_TYPE, REFERENCE_TYPE, USER_ID, CREATOR_NAME, COMPANY_NAME, CAMPAIGN_NAME, PAYMENT_AMOUNT, PAYMENT_STATUS, PAYMENT_DATE, CREATED_DATE, STRIPE_CUSTOMER_ID, STRIPE_CUSTOMER_NAME, STRIPE_CONNECTED_ACCOUNT_ID, STRIPE_CONNECTED_ACCOUNT_NAME"
+                if constraints and constraints.get("allowed_columns"):
+                    allowed_columns = constraints["allowed_columns"]
+                
                 prompt = f"""You are a Snowflake SQL expert for {request.view_name}.
+
+CRITICAL: Only these columns exist in {request.view_name}:
+{allowed_columns}
+
+DO NOT use any other columns. Common mistakes to avoid:
+- There is NO 'PAYMENT_ID' column (use REFERENCE_ID instead)
+- There is NO 'ID' column (use REFERENCE_ID)
+- For counting rows, use COUNT(*) or COUNT(REFERENCE_ID)
 
 {relevant_context}
 
@@ -109,7 +123,7 @@ Return only the SQL, no explanation."""
             logging.info(f"Cortex generated SQL for query '{request.natural_language_query[:50]}...': {generated_sql}")
             
             # Validate using dynamic validator (loads allowed tables from DB)
-            validator = DynamicSqlValidator()
+            validator = SqlValidator()
             validation_result = validator.validate_sql_query(generated_sql)
             
             # Additional validation for view-specific constraints (only if not using search)
