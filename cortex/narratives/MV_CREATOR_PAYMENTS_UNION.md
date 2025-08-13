@@ -95,27 +95,23 @@ The following terms (case-insensitive) MUST ALWAYS be interpreted as PAYMENT_TYP
 - To count by type: Use `COUNT(*)` with `GROUP BY PAYMENT_TYPE`
 - NEVER use `COUNT(PAYMENT_ID)` - this column does not exist
 
-## CRITICAL: Exact Company Name Matching Rules
-**IMPORTANT: When users specify company names, use EXACT matching to avoid substring matches:**
+## Special Cases: PAKA and ALPAKA Companies
+**IMPORTANT: We have two companies with similar names that require special handling:**
 
-When a user asks for a specific company by name (e.g., "PAKA"), you MUST use exact matching:
-- ✅ CORRECT: `WHERE COMPANY_NAME = 'PAKA'` (exact match)
-- ✅ CORRECT: `WHERE STRIPE_CUSTOMER_NAME = 'PAKA'` (exact match)
-- ❌ WRONG: `WHERE COMPANY_NAME LIKE '%PAKA%'` (would incorrectly match "ALPAKA")
+- **PAKA** - A distinct company (53 payments)
+- **ALPAKA** - A separate company (23 payments)
 
-**Known company names that require exact matching:**
-- PAKA (not ALPAKA)
-- ALPAKA (not PAKA)
+Since "PAKA" is a substring of "ALPAKA", when users ask specifically for "PAKA", use exact matching:
+- If user says "PAKA" → Use `WHERE COMPANY_NAME = 'PAKA'` (NOT LIKE '%PAKA%')
+- If user says "ALPAKA" → Use `WHERE COMPANY_NAME = 'ALPAKA'`
+- If user says "companies containing paka" → Use `WHERE COMPANY_NAME LIKE '%PAKA%'` (would match both)
 
-**When to use LIKE patterns:**
-- Only when the user explicitly asks for partial matches (e.g., "companies containing 'tech'")
-- When searching for campaigns or creators where partial matching makes sense
-- Never for known company names unless specifically requested
+**For all other company searches, continue using LIKE patterns for flexibility** unless the user requests exact matching.
 
 **Examples:**
-- "PAKA payments" → `WHERE COMPANY_NAME = 'PAKA'`
-- "companies like PAKA" → `WHERE COMPANY_NAME LIKE '%PAKA%'`
-- "show me PAKA creator payment totals" → `WHERE COMPANY_NAME = 'PAKA'`
+- "PAKA payments" → `WHERE COMPANY_NAME = 'PAKA'` (exact match to avoid ALPAKA)
+- "Popfly payments" → `WHERE COMPANY_NAME LIKE '%Popfly%'` (normal pattern matching)
+- "companies with tech in the name" → `WHERE COMPANY_NAME LIKE '%tech%'` (pattern matching)
 
 ## Key columns
 - PAYMENT_STATUS
@@ -199,9 +195,9 @@ When a user asks for a specific company by name (e.g., "PAKA"), you MUST use exa
 - Unpaid invoices by campaign
 - "Show labs payments" → `SELECT * FROM MV_CREATOR_PAYMENTS_UNION WHERE PAYMENT_TYPE = 'Agency Mode'`
 - "List Popfly Labs invoices" → `SELECT * FROM MV_CREATOR_PAYMENTS_UNION WHERE PAYMENT_TYPE = 'Agency Mode' AND REFERENCE_TYPE LIKE '%Invoice%'`
-- "PAKA creator payment totals by campaign" → `SELECT CAMPAIGN_NAME, SUM(PAYMENT_AMOUNT) FROM MV_CREATOR_PAYMENTS_UNION WHERE COMPANY_NAME = 'PAKA' GROUP BY CAMPAIGN_NAME`
-- "ALPAKA payments" → `SELECT * FROM MV_CREATOR_PAYMENTS_UNION WHERE COMPANY_NAME = 'ALPAKA'`
-- "Show PAKA invoices" → `SELECT * FROM MV_CREATOR_PAYMENTS_UNION WHERE COMPANY_NAME = 'PAKA' AND REFERENCE_TYPE LIKE '%Invoice%'`
+- "PAKA creator payment totals by campaign" → `SELECT CAMPAIGN_NAME, SUM(PAYMENT_AMOUNT) FROM MV_CREATOR_PAYMENTS_UNION WHERE COMPANY_NAME = 'PAKA' GROUP BY CAMPAIGN_NAME` (special case: exact match)
+- "ALPAKA payments" → `SELECT * FROM MV_CREATOR_PAYMENTS_UNION WHERE COMPANY_NAME = 'ALPAKA'` (special case: exact match)
+- "companies containing roll" → `SELECT DISTINCT COMPANY_NAME FROM MV_CREATOR_PAYMENTS_UNION WHERE COMPANY_NAME LIKE '%roll%'` (normal pattern matching)
 - "agency services total" → `SELECT SUM(PAYMENT_AMOUNT) FROM MV_CREATOR_PAYMENTS_UNION WHERE PAYMENT_TYPE = 'Agency Mode'`
 - "agency payments" → `SELECT * FROM MV_CREATOR_PAYMENTS_UNION WHERE PAYMENT_TYPE = 'Agency Mode'`
 - "self-serve payments" → `SELECT * FROM MV_CREATOR_PAYMENTS_UNION WHERE PAYMENT_TYPE = 'Direct Mode'`
