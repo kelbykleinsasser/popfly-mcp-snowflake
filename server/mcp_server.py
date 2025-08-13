@@ -9,8 +9,7 @@ from mcp.types import TextContent, Tool
 
 from config.settings import settings
 from utils.config import get_environment_snowflake_connection, setup_logging
-from tools.snowflake_tools import get_snowflake_tools
-from tools.cortex_tools import get_cortex_tools
+from tools.dynamic_registry import initialize_registry, get_registry
 
 class SnowflakeMCP:
     def __init__(self):
@@ -30,6 +29,9 @@ class SnowflakeMCP:
             # Test Snowflake connection
             await self.test_snowflake_connection()
             
+            # Initialize dynamic tool registry
+            initialize_registry()
+            
             self.logger.info("Snowflake MCP Server initialized successfully")
             
         except Exception as error:
@@ -41,12 +43,17 @@ class SnowflakeMCP:
         
         @self.server.list_tools()
         async def list_tools() -> List[Tool]:
-            """Return list of available tools"""
+            """Return list of available tools from dynamic registry"""
             from utils.logging import log_activity
             
+            registry = get_registry()
+            
+            # Get tools for default group (stdio doesn't support groups yet)
             tools = []
-            tools.extend(get_snowflake_tools())
-            tools.extend(get_cortex_tools())
+            if registry and registry.tools:
+                tools = registry.get_tools_for_group('default')
+            else:
+                self.logger.warning("Tool registry not available - returning empty tool list")
             
             # Log the list_tools operation for consistency with HTTP server
             await log_activity(
@@ -61,9 +68,7 @@ class SnowflakeMCP:
             
         @self.server.call_tool()
         async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
-            """Handle tool calls with raw request logging"""
-            from tools.snowflake_tools import handle_snowflake_tool
-            from tools.cortex_tools import handle_cortex_tool
+            """Handle tool calls using dynamic registry"""
             
             # Capture raw request as JSON string
             raw_request = json.dumps({
@@ -72,13 +77,34 @@ class SnowflakeMCP:
                 "arguments": arguments
             })
             
-            # Route to appropriate tool handler with raw request
-            if name in ['list_databases', 'list_schemas', 'list_tables', 'describe_table', 'read_query', 'append_insight']:
-                return await handle_snowflake_tool(name, arguments, raw_request=raw_request)
-            elif name in ['query_payments']:
-                return await handle_cortex_tool(name, arguments, raw_request=raw_request)
-            else:
+            registry = get_registry()
+            if not registry:
+                return [TextContent(type="text", text="Tool registry not available")]
+            
+            # Get handler from registry
+            handler = registry.get_handler(name)
+            if not handler:
                 return [TextContent(type="text", text=f"Unknown tool: {name}")]
+            
+            try:
+                # Call the handler with appropriate arguments
+                # Handlers expect (arguments, bearer_token, request_id, raw_request)
+                result = await handler(
+                    arguments, 
+                    bearer_token=None,  # No bearer token in stdio mode
+                    request_id=None,    # No request ID in stdio mode
+                    raw_request=raw_request
+                )
+                
+                # Ensure result is a list of TextContent
+                if isinstance(result, list):
+                    return result
+                else:
+                    return [TextContent(type="text", text=str(result))]
+                    
+            except Exception as error:
+                self.logger.error(f"Tool execution failed: {error}")
+                return [TextContent(type="text", text=f"Tool execution failed: {str(error)}")]
     
     async def test_snowflake_connection(self):
         """Test Snowflake connectivity during startup"""
