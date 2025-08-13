@@ -106,8 +106,10 @@ async def query_payments_handler(arguments: Dict[str, Any], bearer_token: str = 
             
             # Extract JSON from the SQL result text
             if "rows returned:" in sql_text:
+                logging.info(f"Found 'rows returned' in SQL text")
                 json_match = re.search(r'\d+\s+rows returned:\s*(\[.*\])', sql_text, re.DOTALL)
                 if json_match:
+                    logging.info(f"Regex matched! Group 1 length: {len(json_match.group(1))}")
                     try:
                         results_data = json.loads(json_match.group(1))
                         row_count = len(results_data)  # Count actual results
@@ -121,6 +123,8 @@ async def query_payments_handler(arguments: Dict[str, Any], bearer_token: str = 
                         time_context = ""
                         query_lower = params.query.lower()
                         sql_lower = cortex_response.generated_sql.lower() if cortex_response.generated_sql else ""
+                        
+                        logging.info(f"Checking for temporal context - Query: '{query_lower[:50]}...', SQL has CURRENT_DATE: {'current_date' in sql_lower}")
                         
                         if "current_date" in sql_lower or "current_timestamp" in sql_lower:
                             # Add explicit temporal context
